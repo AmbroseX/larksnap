@@ -1,0 +1,38 @@
+{
+  "manifest_version": 3,
+  "name": "飞书文档导出助手",
+  "version": "0.2.1",
+  "description": "在飞书文档页面一键导出为 Markdown / PDF / HTML，批量下载附件，支持离线缓存。",
+  "permissions": [
+    "cookies",
+    "tabs",
+    "activeTab",
+    "scripting",
+    "storage",
+    "unlimitedStorage",
+    "downloads",
+    "webNavigation",
+    "sidePanel"
+  ],
+  "host_permissions": [
+    "*://*.feishu.cn/*",
+    "*://*.feishu.net/*",
+    "*://*.larksuite.com/*"
+  ],
+  "optional_host_permissions": [
+    "*://*/*"
+  ],
+  "background": {
+    "service_worker": "src/background/index.ts",
+    "type": "module"
+  },
+  "action": {
+    "default_title": "飞书文档导出助手"
+  },
+  "options_page": "options.html",
+  "side_panel": {
+    "default_path": "sidepanel.html"
+  },
+  "content_scripts": [],
+  "icons": {}
+}
