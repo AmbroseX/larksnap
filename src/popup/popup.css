@@ -1,0 +1,38 @@
+body {
+  margin: 0;
+  font-family: -apple-system, BlinkMacSystemFont, 'PingFang SC', 'Microsoft YaHei',
+    sans-serif;
+}
+
+/* 宽度收在 popup 容器上，避免 body 全局规则泄漏到合并后的侧边栏/选项页 CSS */
+.popup {
+  width: 260px;
+  padding: 16px;
+  text-align: center;
+}
+
+.popup h1 {
+  font-size: 15px;
+  margin: 0 0 8px;
+}
+
+.popup p {
+  font-size: 12px;
+  color: #8f959e;
+  margin: 0 0 14px;
+}
+
+.popup button {
+  background: #3370ff;
+  color: #fff;
+  border: none;
+  border-radius: 6px;
+  padding: 8px 16px;
+  font-size: 13px;
+  cursor: pointer;
+  width: 100%;
+}
+
+.popup button:hover {
+  background: #245bdb;
+}

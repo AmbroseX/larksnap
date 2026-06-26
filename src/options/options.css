@@ -1,0 +1,95 @@
+body {
+  margin: 0;
+  font-family: -apple-system, BlinkMacSystemFont, 'PingFang SC', 'Microsoft YaHei',
+    'Segoe UI', sans-serif;
+  background: #f5f6f8;
+  color: #1f2329;
+}
+
+.options {
+  max-width: 560px;
+  margin: 40px auto;
+  background: #fff;
+  border-radius: 12px;
+  padding: 28px 32px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
+}
+
+.options h1 {
+  font-size: 18px;
+  margin: 0 0 24px;
+}
+
+.field {
+  margin-bottom: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.field label {
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.field input[type='text'],
+.field select {
+  padding: 8px 10px;
+  border: 1px solid #dfe3e8;
+  border-radius: 6px;
+  font-size: 13px;
+  font-family: inherit;
+}
+
+.field.checkbox label {
+  flex-direction: row;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 400;
+}
+
+.save-btn {
+  background: #3370ff;
+  color: #fff;
+  border: none;
+  border-radius: 6px;
+  padding: 9px 20px;
+  font-size: 14px;
+  cursor: pointer;
+  font-family: inherit;
+}
+
+.save-btn:hover {
+  background: #245bdb;
+}
+
+.saved-hint {
+  margin-left: 12px;
+  color: #2ea121;
+  font-size: 13px;
+}
+
+/* 已信任域名列表 */
+.trusted-empty { color: #888; font-size: 13px; margin: 4px 0; }
+.trusted-list { list-style: none; padding: 0; margin: 4px 0; }
+.trusted-list li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 10px;
+  border: 1px solid #eee;
+  border-radius: 6px;
+  margin-bottom: 6px;
+  font-size: 13px;
+}
+.trusted-origin { word-break: break-all; }
+.revoke-btn {
+  margin-left: 8px;
+  padding: 3px 10px;
+  background: #fff1f0;
+  color: #cf1322;
+  border: 1px solid #ffa39e;
+  border-radius: 4px;
+  cursor: pointer;
+}
