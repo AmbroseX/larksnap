@@ -1,0 +1,75 @@
+import type { ExtensionConfig } from './types';
+
+/** 扩展版本（与 manifest 保持同步） */
+export const EXTENSION_VERSION = '0.1.0';
+
+/** chrome.storage.local 的键名 */
+export const STORAGE_KEYS = {
+  CONFIG: 'feishu2md:config',
+  RUNTIME_STATE: 'feishu2md:runtime',
+  /** 缓存文档索引 */
+  CACHE_INDEX: 'feishu2md:cache:index',
+  /** 单篇缓存内容前缀，完整键为 `${CACHE_DOC_PREFIX}${token}` */
+  CACHE_DOC_PREFIX: 'feishu2md:cache:doc:',
+  /** Markdown 导出能力缓存（按 host）：Record<host, MarkdownCapability> */
+  MD_CAP: 'feishu2md:md-capability',
+} as const;
+
+/** UI ↔ 背景 的消息类型 */
+export const MSG = {
+  // 文档识别
+  GET_DOC_INFO: 'get_doc_info',
+  // 导出动作
+  EXPORT_MARKDOWN: 'export_markdown',
+  EXPORT_WORD: 'export_word',
+  EXPORT_PDF: 'export_pdf',
+  EXPORT_HTML: 'export_html',
+  EXPORT_ATTACHMENTS: 'export_attachments',
+  // 缓存
+  CACHE_DOC: 'cache_doc',
+  CACHE_LIST: 'cache_list',
+  CACHE_DELETE: 'cache_delete',
+  CACHE_GET: 'cache_get',
+  // 工具
+  EXPORT_DIAGNOSTIC: 'export_diagnostic',
+  // 状态
+  GET_STATUS: 'get_status',
+  // content → SW：读取 Cookie（HttpOnly CSRF token）
+  GET_COOKIE: 'get_cookie',
+  // 私有化域名权限（UI 用户手势触发）
+  CHECK_PERMISSION: 'check_permission',
+  REQUEST_PERMISSION: 'request_permission',
+  REVOKE_PERMISSION: 'revoke_permission',
+  LIST_TRUSTED: 'list_trusted',
+  // 背景 → UI 的进度推送
+  PROGRESS: 'progress',
+} as const;
+
+/** content script 内部消息类型（背景 → content） */
+export const CONTENT_MSG = {
+  DETECT_DOC: 'detect_doc',
+  GET_SNAPSHOT: 'get_snapshot',
+  /** 代发飞书内部接口（同源 fetch）：data={ method, path, body? } */
+  FEISHU_REQUEST: 'feishu_request',
+  /** 下载媒体二进制（content 同源 fetch → base64）：data={ token, objToken } */
+  DOWNLOAD_MEDIA: 'download_media',
+  /** 滚动加载全文（懒加载内容） */
+  SCROLL_LOAD: 'scroll_load',
+} as const;
+
+/** POST 校验用的 CSRF cookie 候选名（按序尝试，失败换名重试） */
+export const CSRF_COOKIE_NAMES = ['_csrf_token', 'swp_csrf_token'];
+
+/** 飞书 token 正则：未知域名识别门槛 */
+export const FEISHU_TOKEN_RE = /^[A-Za-z0-9]{16,}$/;
+
+/** 飞书文档支持的域名后缀 */
+export const FEISHU_HOSTS = ['feishu.cn', 'feishu.net', 'larksuite.com'];
+
+/** 默认配置 */
+export const DEFAULT_CONFIG: ExtensionConfig = {
+  imageMode: 'download',
+  feedbackUrl: 'https://github.com/your-org/feishu2md-extension/issues/new',
+  diagnosticIncludeSnapshot: true,
+  trustedDomains: [],
+};
