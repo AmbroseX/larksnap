@@ -20,7 +20,7 @@ export function baseDomain(host: string): string {
 
 /**
  * 媒体/导出文件的下载流域名：`internal-api-drive-stream.{基础域}`。
- * 实测：example-corp 私有化 → `internal-api-drive-stream.corp.example.com`；
+ * 实测：私有化示例 → `internal-api-drive-stream.corp.example.com`；
  *       公有云 → `internal-api-drive-stream.feishu.cn`。
  */
 export function driveStreamHost(host: string): string {

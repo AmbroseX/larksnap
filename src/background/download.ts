@@ -1,5 +1,17 @@
 /** chrome.downloads 落盘封装（产物只落本地，绝不外发——宪法原则 V） */
 
+/**
+ * 下载拦截 sink —— 桥接模式（CC 经原生宿主拉取）下，不落 chrome.downloads，
+ * 而是把产物（data URL + 文件名）交给桥接回传给 CC。设为 null 即恢复正常落盘。
+ * 所有导出器都经 downloadDataUrl/downloadBase64 出口，故此处单点拦截即可覆盖
+ * markdown / pdf / html / attachments 四类。
+ */
+type DownloadSink = (artifact: { url: string; filename: string }) => void;
+let _sink: DownloadSink | null = null;
+export function setDownloadSink(sink: DownloadSink | null): void {
+  _sink = sink;
+}
+
 // 控制字符（U+0000–U+001F 与 U+007F）：文件名里出现会被判非法
 const CONTROL_CHARS = new RegExp('[\\u0000-\\u001f\\u007f]', 'g');
 const ILLEGAL_CHARS = /[\\/:*?"<>|]/g;
@@ -23,6 +35,11 @@ export async function downloadDataUrl(
   url: string,
   filename: string
 ): Promise<void> {
+  if (_sink) {
+    // 桥接模式：拦截产物交给 CC，不落本地下载目录
+    _sink({ url, filename });
+    return;
+  }
   try {
     await chrome.downloads.download({ url, filename, saveAs: false });
   } catch (err) {

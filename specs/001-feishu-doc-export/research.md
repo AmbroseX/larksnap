@@ -28,7 +28,7 @@
 
 **问题**: 走官方导出还是自解码?
 
-**研究结果**: 官方 md 导出是**租户级开关**。公有云 `my.feishu.cn` `export/create(md)` → `code:0` 产真 .md;example-corp 私有化 pdf/docx/md 全 `1002 no permission`(整体禁用)。
+**研究结果**: 官方 md 导出是**租户级开关**。公有云 `my.feishu.cn` `export/create(md)` → `code:0` 产真 .md;私有化示例 pdf/docx/md 全 `1002 no permission`(整体禁用)。
 
 **Decision**: **双路 + 运行时按 host 探测**。P-official 优先;非 0/无 ticket 回退 P-decode。结论按 host 缓存 `md_export_supported`。apool 解码器为**必做**。
 

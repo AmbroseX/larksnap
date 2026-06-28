@@ -12,8 +12,12 @@ import { cacheDoc, listCache, removeCache, getCache } from './cache-manager';
 import { exportDiagnostic } from './diagnostic';
 import { getCookie } from './cookie';
 import { hasPermissionForHost, recordTrusted, revokePermission, listTrusted } from './permissions';
+import { startBridge, getBridgeStatus } from './bridge';
 
 console.log('[feishu2md] Service Worker 启动');
+
+// CC ⇄ 扩展 桥接：连原生宿主、长连保活、接收远程导出任务
+startBridge();
 
 // ==================== 点击图标打开侧边栏 ====================
 chrome.sidePanel
@@ -57,6 +61,10 @@ async function handleMessage(
     case MSG.GET_STATUS: {
       const state = await getRuntimeState();
       return { success: true, data: state };
+    }
+
+    case MSG.GET_BRIDGE_STATUS: {
+      return { success: true, data: await getBridgeStatus() };
     }
 
     case MSG.GET_DOC_INFO: {

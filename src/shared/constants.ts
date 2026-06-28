@@ -34,6 +34,8 @@ export const MSG = {
   EXPORT_DIAGNOSTIC: 'export_diagnostic',
   // 状态
   GET_STATUS: 'get_status',
+  // 桥接（CC ⇄ daemon）连接状态：popup 展示版本/连接/profile
+  GET_BRIDGE_STATUS: 'get_bridge_status',
   // content → SW：读取 Cookie（HttpOnly CSRF token）
   GET_COOKIE: 'get_cookie',
   // 私有化域名权限（UI 用户手势触发）

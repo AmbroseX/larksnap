@@ -81,7 +81,7 @@ export interface ExtensionConfig {
   feedbackUrl: string;
   /** 是否在导出诊断信息中包含页面快照 */
   diagnosticIncludeSnapshot: boolean;
-  /** 已运行时授权的私有化域名 origin 列表（如 https://x.corp.example.com） */
+  /** 已运行时授权的私有化域名 origin 列表（如 https://x.私有化租户.com） */
   trustedDomains: string[];
 }
 

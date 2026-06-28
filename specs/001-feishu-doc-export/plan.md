@@ -11,7 +11,7 @@
 **Language/Version**: TypeScript 5.5(`tsconfig` `strict`),ES2022 / Chrome 110+ target
 **Primary Dependencies**: React 18(UI)、Vite 5 + `@vitejs/plugin-react`(构建)、esbuild(content IIFE)、JavaScript-Obfuscator(生产混淆);新增 zip 能力(见 research:JSZip 或自研最小 store-zip)
 **Storage**: `chrome.storage.local`(config / runtime / cache / 能力缓存 / 已信任域名),大文档需 `unlimitedStorage`
-**Testing**: `npm run typecheck`(`tsc --noEmit`)+ `npm run build` 必过;手工验收(公有云 + example-corp 私有化两类页面)
+**Testing**: `npm run typecheck`(`tsc --noEmit`)+ `npm run build` 必过;手工验收(公有云 + 私有化示例两类页面)
 **Target Platform**: Chrome MV3 扩展(Service Worker + content scripts + side panel + React UI)
 **Project Type**: 浏览器扩展(三层:UI / 背景 SW / content)
 **Performance Goals**: 媒体下载并发 ≤ 3 + 退避重试;大文档分页拉块 + 流式写 zip;识别/选路结论缓存避免重复探测

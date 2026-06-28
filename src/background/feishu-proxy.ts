@@ -7,6 +7,15 @@ import { getActiveTab } from './doc-detect';
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 /**
+ * 内容请求的目标 tab 覆盖 —— 桥接模式下导出的是「后台新开的标签页」而非活跃页，
+ * 故所有同源 content 请求需打到该 tab。设为 null 即回退活跃 tab（UI 触发路径）。
+ */
+let _contentTabId: number | null = null;
+export function setContentTab(tabId: number | null): void {
+  _contentTabId = tabId;
+}
+
+/**
  * SW 侧代发飞书内部接口的代理 —— 实际请求由 content script 同源发起（宪法原则 I）。
  * SW 这里只负责"确保 content 已注入 + 把请求转给它 + 取回结果"。
  */
@@ -30,6 +39,10 @@ async function send<T>(tabId: number, message: unknown): Promise<T> {
 
 /** 取当前活跃 tab 的 id，并确保 content 已注入 */
 async function activeContentTab(): Promise<number> {
+  if (_contentTabId != null) {
+    await ensureContent(_contentTabId);
+    return _contentTabId;
+  }
   const tab = await getActiveTab();
   if (!tab?.id) throw new Error('无活跃标签页');
   await ensureContent(tab.id);
