@@ -1,0 +1,65 @@
+# 隐私政策 / Privacy Policy
+
+*生效日期 / Effective date: 2026-07-01*
+
+---
+
+## 简体中文
+
+**larksnap · 飞书文档导出助手**(以下简称"本扩展")是一个纯客户端的浏览器扩展。我们高度重视你的隐私。核心原则一句话:**你的任何数据都不会离开你的设备。**
+
+### 本扩展会访问什么
+
+- **Cookie**:仅读取你当前所访问的飞书 / Lark 域名下的登录 Cookie,用于以你的身份、同源地调用飞书网页自身的内部接口来完成导出。
+- **文档内容**:你主动点击导出时,当前文档页面的内容。
+- **网站访问权限(host permissions)**:用于在飞书文档页面注入脚本、下载图片与附件。私有化 / 自建域名采用可选权限,由你在需要时手势授权。
+
+### 这些数据如何被使用
+
+- 全部处理**只发生在你本地的浏览器中**,用于生成导出文件(Markdown / PDF / HTML)、下载附件、或(可选)通过本地回环 daemon 交给你自己的命令行工具。
+- 导出产物通过 Chrome 的下载功能保存到**你自己选择的本地位置**;离线缓存保存在**浏览器本地存储**中。
+
+### 我们不会做什么
+
+- **不**将你的文档内容、Cookie、登录态或任何数据发送到开发者或任何第三方的服务器。
+- **不**做埋点、分析、追踪或广告。
+- **不**出售或分享任何数据。
+
+### 可选的本地桥接
+
+若你启用命令行桥接功能,会有一个仅绑定 `127.0.0.1`(本机回环)的本地 daemon,用于把导出任务从你的命令行工具转交给扩展。它不监听外部网络,数据不出本机。
+
+### 联系方式
+
+问题或反馈请提交 issue:<https://github.com/AmbroseX/larksnap/issues>
+
+---
+
+## English
+
+**larksnap** (the "Extension") is a fully client-side browser extension. We take your privacy seriously. In one sentence: **none of your data ever leaves your device.**
+
+### What the Extension accesses
+
+- **Cookies**: only the login cookies of the Feishu / Lark domain you are currently visiting, used to call Feishu's own internal web APIs same-origin, as you, to perform the export.
+- **Document content**: the content of the current document page, only when you explicitly click export.
+- **Host permissions**: used to inject scripts on Feishu doc pages and download images/attachments. Private / self-hosted domains use optional permissions granted by you on demand.
+
+### How the data is used
+
+- All processing happens **entirely in your local browser**, to produce export files (Markdown / PDF / HTML), download attachments, or (optionally) hand the job to your own command-line tool via a local loopback daemon.
+- Exports are saved via Chrome's downloads to **a local location you choose**; offline cache is stored in **browser local storage**.
+
+### What we do NOT do
+
+- We do **not** send your document content, cookies, login state, or any data to the developer's or any third party's servers.
+- We do **not** perform analytics, tracking, or advertising.
+- We do **not** sell or share any data.
+
+### Optional local bridge
+
+If you enable the command-line bridge, a local daemon bound to `127.0.0.1` (loopback only) relays export jobs from your CLI tool to the extension. It does not listen on any external network; data never leaves your machine.
+
+### Contact
+
+For questions or feedback, please open an issue: <https://github.com/AmbroseX/larksnap/issues>
