@@ -2,7 +2,7 @@
 
 [简体中文](README.md) | **English**
 
-> Chrome MV3 extension · One-click export of Feishu / Lark docs to **Markdown / PDF / HTML**, batch-download attachments, and cache docs offline.
+> Chrome MV3 extension · One-click export of Feishu / Lark docs to **Markdown / PDF / HTML**, batch-download attachments, and cache docs offline; plus **any-page → Markdown**, copy-protection unlock, and auto-copy on selection.
 
 Zero config, fully client-side, nothing leaves your machine — and it **works with self-hosted / private-deployment** Feishu domains.
 
@@ -20,7 +20,7 @@ Zero config, fully client-side, nothing leaves your machine — and it **works w
 
 In many enterprise tenants the official Feishu "Export" button is disabled by admins, while third-party exporters typically require you to register an app on the Feishu Open Platform, request scopes, and wait for approval. This extension takes a different route: **it reuses the login cookie already in your browser and Feishu's own internal web APIs**. Open the side panel on a doc page and export in one click — no backend, no API application.
 
-It was originally built for LLM-corpus / knowledge-base migration — turning docs scattered across Feishu into high-quality Markdown in bulk, images packed alongside.
+It was originally built for LLM-corpus / knowledge-base migration — turning docs scattered across Feishu into high-quality Markdown in bulk, images packed alongside. That Markdown pipeline is now open to every web page: convert any page (or just a selection) to Markdown in one click, and unlock pages that block copying while you're at it.
 
 ## Features
 
@@ -30,6 +30,10 @@ It was originally built for LLM-corpus / knowledge-base migration — turning do
 - **Private-deployment friendly**: no domain allowlist. Beyond public cloud (`feishu.cn` / `feishu.net` / `larksuite.com`) it also recognizes self-hosted domains (e.g. `*.corp.example.com`); host permissions are granted at runtime on demand, and granted domains can be reviewed / revoked.
 - **Batch attachment download**: parses image / file tokens in the doc and saves them via the media download API.
 - **Offline cache**: store docs as local snapshots for offline browsing and management.
+- **Any web page → Markdown**: non-Feishu pages go through Readability content extraction + Turndown (GFM) conversion; copy or download `.md` from the side panel or the page context menu. Sites whose content isn't in the DOM get dedicated adapters (Baidu Wenku supported).
+- **Copy-protection unlock**: one click unlocks pages that block selection / copy / right-click — three reversible layers (event, style, inline handlers); toggle off to restore the page exactly.
+- **Auto-copy on selection**: once enabled, selected text goes straight to the clipboard (plain text or Markdown, minimum length configurable in settings); session-scoped, never persistent.
+- **Copy tab links**: copy the current tab or all tabs in one click, as Markdown links / title+URL / title only / URL only.
 - **Export diagnostics**: one-click export of a redacted diagnostic bundle (DocInfo / API response samples / routing decision / version) to pin down field differences between private and public deployments — PII fields like `editor_map` / `user_map` / `creator_id` are explicitly stripped.
 - **CC bridge (optional)**: connect command-line tools like Claude Code to this logged-in extension via a local daemon and run exports unattended (see [CC bridge skill](#cc-bridge-skill-feishu-doc-fetch)).
 
@@ -89,9 +93,23 @@ npm run build          # production build → dist/
    | Cache locally / view cache | Offline snapshots and management | ✅ |
    | Export diagnostics | Locate format differences on private Feishu (redacted) | ✅ |
    | Export as Word | — | 🚧 In progress |
-   | Any web page → Markdown | Non-Feishu pages via a generic Readability + Turndown pipeline | 📐 Planned ([spec 002](specs/002-generic-page-markdown/)) |
+   | Any web page → Markdown | Non-Feishu pages via a generic Readability + Turndown pipeline | ✅ ([spec 002](specs/002-generic-page-markdown/)) |
 
 > ⚠️ When a tenant has disabled official export and the extension falls back to P-decode, it first warns "official export for this doc is disabled; continuing bypasses that restriction." **Use only when you are authorized to.**
+
+### Web copy (non-Feishu pages)
+
+On a **non-Feishu page** the side panel automatically switches to the "Web copy" view; you can also skip the panel entirely and use the page **context menu**:
+
+| Action | Notes |
+|---|---|
+| Page → Markdown (copy / download `.md`) | Readability extracts the article → Turndown (GFM) converts it; sites like Baidu Wenku that render text into canvas use a built-in adapter that fetches the data directly |
+| Selection → Markdown | Converts the selected HTML to Markdown and copies it |
+| Copy-protection unlock (on / off) | Unlocks pages that block selection / copy / right-click; turning it off restores the page exactly |
+| Auto-copy on selection | Selections of ≥ N chars go straight to the clipboard (threshold and plain-text / Markdown format configurable in settings); session-scoped per tab |
+| Copy tab links | Current tab as a Markdown link; all tabs as Markdown / title+URL / title only / URL only |
+
+Permissions: the context menu relies on the `activeTab` gesture — **no domain needs to be pre-authorized**; if the side-panel path fails to inject, it prompts for that domain's permission within the same click, and you can always fall back to the context menu.
 
 ## CC bridge skill (feishu-doc-fetch)
 
@@ -173,8 +191,11 @@ src/
     cache-manager.ts   #   local cache read/write
     diagnostic.ts      #   redacted diagnostics
     permissions.ts     #   runtime auth for private domains / trusted list
+    webcopy.ts         #   web-copy SW side (context menu / injection / tab links)
+    webcopy-adapters.ts#   site-specific adapters (Baidu Wenku etc.)
   content/             # injected page scripts (same-origin fetch / DOM snapshot)
-  sidepanel/           # side panel UI (React)
+    webcopy/           #   web copy (Readability + Turndown / unlock / auto-copy)
+  sidepanel/           # side panel UI (React, Feishu export + web copy views)
   options/             # settings UI
   popup/               # popup UI
   shared/              # types / constants / storage / messaging / host derivation
@@ -198,12 +219,14 @@ npm run build      # production build + obfuscation → dist/
 ./build.sh --zip   # also package release/*.zip (for Chrome Web Store upload)
 ```
 
+Pushing a `v*` tag (e.g. `v0.2.4`) triggers GitHub Actions to build, package zip / crx, and create a GitHub Release (see [`.github/workflows/release.yml`](.github/workflows/release.yml)).
+
 ## Tech stack
 
 - **Runtime**: Chrome Manifest V3 (Service Worker + Side Panel + content script)
 - **UI**: React 18 + TypeScript
 - **Build**: Vite 5 (multi-entry React + content script as IIFE) + `javascript-obfuscator` for production
-- **Deps**: `jszip` (packaging), `marked` (Markdown rendering)
+- **Deps**: `jszip` (packaging), `marked` (Markdown rendering), `@mozilla/readability` + `turndown` (web page → Markdown)
 - **Bridge**: zero-dependency Node.js HTTP + hand-rolled WebSocket daemon
 
 ## Privacy & compliance
@@ -219,8 +242,10 @@ npm run build      # production build + obfuscation → dist/
 - [x] PDF / HTML / attachments / offline cache
 - [x] Private-deployment compatibility + diagnostics
 - [x] CC ⇄ extension local bridge
+- [x] Any web page → Markdown (Readability + Turndown generic pipeline + site adapters)
+- [x] Copy-protection unlock / auto-copy on selection / tab-link copy
 - [ ] Word export
-- [ ] Any web page → Markdown generic pipeline (Readability + Turndown)
+- [ ] More site adapters (Zhihu, WeChat articles, etc.)
 - [ ] Multi-doc / knowledge-base batch export
 
 ## Acknowledgments

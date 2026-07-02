@@ -10,10 +10,5 @@ extension.pem
 ref/
 .claude/
 
-# 内部资料（草稿/参考PRD/商业化方案，不公开）
+# 内部资料（草稿/参考PRD）
 docs/internal/
-docs/商业化方案.md
-
-# 飞书导出样例文档（含真实文档内容，避免版权/隐私问题）
-docs/文章解析+解构/
-docs/无监督数据修复/

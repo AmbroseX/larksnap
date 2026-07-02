@@ -12,7 +12,9 @@
 
 - **Cookie**:仅读取你当前所访问的飞书 / Lark 域名下的登录 Cookie,用于以你的身份、同源地调用飞书网页自身的内部接口来完成导出。
 - **文档内容**:你主动点击导出时,当前文档页面的内容。
-- **网站访问权限(host permissions)**:用于在飞书文档页面注入脚本、下载图片与附件。私有化 / 自建域名采用可选权限,由你在需要时手势授权。
+- **网页内容**:你在普通网页上主动触发「转 Markdown / 解除复制限制 / 自动复制」时,当前标签页的页面内容;转换在本地完成,结果只进你的剪贴板或本地下载。
+- **剪贴板**:仅**写入**转换结果(Markdown / 链接文本),从不读取你剪贴板中的既有内容。
+- **网站访问权限(host permissions)**:用于在飞书文档页面注入脚本、下载图片与附件。私有化 / 自建域名及普通网页采用可选权限或 activeTab,由你在需要时手势授权。
 
 ### 这些数据如何被使用
 
@@ -43,7 +45,9 @@
 
 - **Cookies**: only the login cookies of the Feishu / Lark domain you are currently visiting, used to call Feishu's own internal web APIs same-origin, as you, to perform the export.
 - **Document content**: the content of the current document page, only when you explicitly click export.
-- **Host permissions**: used to inject scripts on Feishu doc pages and download images/attachments. Private / self-hosted domains use optional permissions granted by you on demand.
+- **Web page content**: the content of the current tab, only when you explicitly trigger "→ Markdown / unlock copy protection / auto-copy" on an ordinary page; conversion happens locally and the result only goes to your clipboard or a local download.
+- **Clipboard**: **write-only** — the extension writes conversion results (Markdown / link text) and never reads what's already on your clipboard.
+- **Host permissions**: used to inject scripts on Feishu doc pages and download images/attachments. Private / self-hosted domains and ordinary pages use optional permissions or activeTab, granted by you on demand.
 
 ### How the data is used
 

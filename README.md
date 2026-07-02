@@ -2,7 +2,7 @@
 
 **简体中文** | [English](README.en.md)
 
-> Chrome MV3 浏览器扩展 · 在飞书 / Lark 文档页面一键导出 **Markdown / PDF / HTML**、批量下载附件、离线缓存文档。
+> Chrome MV3 浏览器扩展 · 在飞书 / Lark 文档页面一键导出 **Markdown / PDF / HTML**、批量下载附件、离线缓存文档；在任意网页上**一键转 Markdown**、解除复制限制、自动复制选中文字。
 
 零配置、纯客户端、内容不外发，并且**兼容企业私有化自建域名**的飞书部署。
 
@@ -20,7 +20,7 @@
 
 飞书官方的「导出」按钮在很多企业租户里被组织管理员关闭，第三方导出工具又普遍要求你到飞书开放平台创建应用、申请权限、等待审批。本扩展换一条路：**直接复用浏览器里已登录的 Cookie 和飞书网页自身的内部接口**，在文档页打开侧边栏即可一键导出，无需任何后端、无需申请 API 权限。
 
-它最初为 LLM 语料 / 知识库迁移场景而生 —— 把散落在飞书里的文档批量、高质量地转成 Markdown，连图片一起打包带走。
+它最初为 LLM 语料 / 知识库迁移场景而生 —— 把散落在飞书里的文档批量、高质量地转成 Markdown，连图片一起打包带走。现在这条 Markdown 流水线也向所有网页开放：任意页面整页 / 选中内容一键转 Markdown，顺带解决「页面禁止复制」的老问题。
 
 ## 核心特性
 
@@ -30,6 +30,10 @@
 - **兼容私有化部署**：不依赖域名白名单。识别公有云（`feishu.cn` / `feishu.net` / `larksuite.com`）之外，也能识别企业自建域名（如 `*.corp.example.com` 私有化飞书）；host 权限按需运行时授权，已授权域名可查看 / 撤销。
 - **批量下载附件**：解析文档中的 image / file token，经素材下载接口批量保存。
 - **离线缓存**：把文档存为本地快照，支持离线浏览与管理。
+- **任意网页 → Markdown**：非飞书页面走 Readability 正文提取 + Turndown（GFM）转换，侧边栏或页面右键菜单一键复制 / 下载 `.md`；正文不在 DOM 里的站点走内置适配器（已支持百度文库）。
+- **解除复制限制**：一键解锁禁止选择 / 复制 / 右键的页面 —— 事件、样式、内联句柄三层拦截，全部可逆，关掉即恢复页面原状。
+- **选中文字自动复制**：开启后选中即进剪贴板（纯文本或 Markdown 可选，设置页可调最小字数），会话级不常驻。
+- **复制标签页链接**：一键复制当前页或全部标签页，支持 Markdown 链接 / 标题+URL / 仅标题 / 仅 URL 四种格式。
 - **导出诊断**：一键导出脱敏的诊断包（DocInfo / 接口响应样本 / 选路结论 / 版本），用于定位私有化与公有云的字段差异 —— 已显式剔除 `editor_map` / `user_map` / `creator_id` 等 PII 字段。
 - **CC 桥接（可选）**：通过本地 daemon 把 Claude Code 等命令行工具接到这个已登录的扩展上，无人值守地跑导出（详见 [CC 桥接技能](#cc-桥接技能feishu-doc-fetch)）。
 
@@ -61,6 +65,8 @@
 
 ## 安装（从源码加载）
 
+> 👤 不想碰命令行？普通用户请看 **[安装与使用教程](docs/安装与使用教程.md)** —— 下载现成安装包、开发者模式加载、飞书导出与网页复制的图文步骤。
+
 ```bash
 git clone https://github.com/AmbroseX/larksnap.git
 cd larksnap
@@ -89,9 +95,23 @@ npm run build          # 生产构建 → dist/
    | 缓存到本地 / 查看缓存 | 离线快照与管理 | ✅ |
    | 导出诊断信息 | 定位私有化飞书的格式差异（脱敏） | ✅ |
    | 导出为 Word | — | 🚧 开发中 |
-   | 任意网页 → Markdown | 非飞书页面走 Readability + Turndown 通用流水线 | 📐 规划中（[spec 002](specs/002-generic-page-markdown/)） |
+   | 任意网页 → Markdown | 非飞书页面走 Readability + Turndown 通用流水线 | ✅（[spec 002](specs/002-generic-page-markdown/)） |
 
 > ⚠️ 当租户已关闭官方导出而扩展走 P-decode 时，会先提示「该文档官方导出已关闭，继续即绕过该限制」。**请仅在获得授权的前提下使用。**
+
+### 网页复制（非飞书页面）
+
+在**非飞书页面**打开侧边栏会自动切换到「网页复制」视图；不开侧边栏也可以直接用页面**右键菜单**：
+
+| 操作 | 说明 |
+|---|---|
+| 整页转 Markdown（复制 / 下载 `.md`） | Readability 提取正文 → Turndown（GFM）转换；百度文库等正文渲染进 canvas 的站点走内置适配器直取数据 |
+| 仅选中内容转 Markdown | 把选区 HTML 转成 Markdown 后复制 |
+| 解除复制限制（开 / 关） | 解锁禁止选择 / 复制 / 右键的页面，关闭后完全恢复原状 |
+| 选中文字自动复制 | 选中 ≥ N 字自动进剪贴板（字数阈值、纯文本 / Markdown 格式在设置页可调），本页会话级生效 |
+| 复制标签页链接 | 当前页复制为 Markdown 链接；全部标签页支持 Markdown / 标题+URL / 仅标题 / 仅 URL |
+
+权限说明：右键菜单靠 `activeTab` 手势授权，**不需要预授权任何域名**；侧边栏路径若注入失败，会在同一次点击里弹出该域名的授权请求，拒绝的话改用右键菜单即可。
 
 ## CC 桥接技能（feishu-doc-fetch）
 
@@ -173,8 +193,11 @@ src/
     cache-manager.ts   #   本地缓存读写
     diagnostic.ts      #   脱敏诊断信息
     permissions.ts     #   私有化域名运行时授权 / 已信任列表
+    webcopy.ts         #   网页复制 SW 侧（右键菜单 / 注入调度 / 标签页链接）
+    webcopy-adapters.ts#   站点专属适配器（百度文库等正文不在 DOM 的站点）
   content/             # 注入页面的脚本（同源发请求 / DOM 快照）
-  sidepanel/           # 侧边栏 UI（React）
+    webcopy/           #   网页复制（Readability + Turndown / 解锁 / 自动复制）
+  sidepanel/           # 侧边栏 UI（React，飞书导出 + 网页复制两个视图）
   options/             # 设置页 UI
   popup/               # 弹窗 UI
   shared/              # 类型 / 常量 / storage / 消息 / host 推导
@@ -198,12 +221,14 @@ npm run build      # 生产构建 + 代码混淆 → dist/
 ./build.sh --zip   # 额外打包成 release/*.zip（用于 Chrome Web Store 上传）
 ```
 
+推送 `v*` 标签（如 `v0.2.4`）会触发 GitHub Actions 自动构建、打包 zip / crx 并创建 GitHub Release（见 [`.github/workflows/release.yml`](.github/workflows/release.yml)）。
+
 ## 技术栈
 
 - **运行时**：Chrome Manifest V3（Service Worker + Side Panel + content script）
 - **UI**：React 18 + TypeScript
 - **构建**：Vite 5（React 多入口 + content script 单独打 IIFE）+ `javascript-obfuscator` 生产混淆
-- **依赖**：`jszip`（打包）、`marked`（Markdown 渲染）
+- **依赖**：`jszip`（打包）、`marked`（Markdown 渲染）、`@mozilla/readability` + `turndown`（网页转 Markdown）
 - **桥接**：Node.js 零依赖 HTTP + 手搓 WebSocket daemon
 
 ## 隐私与合规
@@ -219,8 +244,10 @@ npm run build      # 生产构建 + 代码混淆 → dist/
 - [x] PDF / HTML / 附件 / 离线缓存
 - [x] 私有化部署兼容 + 诊断工具
 - [x] CC ⇄ 扩展 本地桥接
+- [x] 任意网页 → Markdown（Readability + Turndown 通用管线 + 站点适配器）
+- [x] 解除复制限制 / 选中自动复制 / 标签页链接复制
 - [ ] Word 导出
-- [ ] 任意网页 → Markdown 通用通道（Readability + Turndown）
+- [ ] 更多站点适配器（知乎、微信公众号等）
 - [ ] 多文档 / 知识库批量导出
 
 ## 致谢
