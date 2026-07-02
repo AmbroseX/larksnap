@@ -7,7 +7,7 @@
 // 收到 daemon push 的 { type:'job', id, url, format } → 后台开标签页跑导出引擎，
 // 用 download sink 截获产物（zip/md 的 data URL）经 WS 回传；登录/授权缺失回 need-*。
 //
-// 端口/路径需与 bridge/protocol.mjs 保持一致。
+// 端口/路径需与 skills/feishu-doc-fetch/scripts/bridge/protocol.mjs 保持一致。
 import type { DocInfo, ExportProgress, Response } from '../shared/types';
 import { CONTENT_MSG } from '../shared/constants';
 import { detectDocFromUrl } from '../content/feishu-detect';
