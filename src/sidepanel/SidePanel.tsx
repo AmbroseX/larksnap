@@ -6,6 +6,7 @@ import { getConfig } from '../shared/storage';
 import { hostOf, permissionPattern } from '../shared/feishu-host';
 import { ACTIONS, type ActionItem } from './actions';
 import { CacheView } from './CacheView';
+import { WebCopyView } from './WebCopyView';
 
 type View = 'home' | 'cache';
 
@@ -115,7 +116,7 @@ export function SidePanel() {
         <p className="subtitle">
           {doc?.isFeishuDoc
             ? `${doc.docType}${doc.isPrivateDeploy ? ' · 私有化' : ''}`
-            : '仅支持飞书文档页面'}
+            : '网页复制 · 任意网页转 Markdown'}
         </p>
         <div className="quota-chip">
           <span className="quota-label">额度</span>
@@ -136,28 +137,29 @@ export function SidePanel() {
         </div>
       )}
 
-      {notFeishu && (
-        <div className="hint-banner">请在飞书文档页面打开本侧边栏。</div>
+      {/* 非飞书页面：网页复制区块为主入口；飞书页面：导出区块（现状） */}
+      {notFeishu ? (
+        <WebCopyView />
+      ) : (
+        <main className="action-list">
+          {ACTIONS.map((item) => (
+            <button
+              key={item.key}
+              className={`action-card${item.disabled ? ' disabled' : ''}${
+                running === item.key ? ' running' : ''
+              }`}
+              onClick={() => handleClick(item)}
+              disabled={item.disabled || !!running || needsAuth}
+            >
+              <div className="action-text">
+                <span className="action-title">{item.title}</span>
+                <span className="action-subtitle">{item.subtitle}</span>
+              </div>
+              <span className="action-arrow">›</span>
+            </button>
+          ))}
+        </main>
       )}
-
-      <main className="action-list">
-        {ACTIONS.map((item) => (
-          <button
-            key={item.key}
-            className={`action-card${item.disabled ? ' disabled' : ''}${
-              running === item.key ? ' running' : ''
-            }`}
-            onClick={() => handleClick(item)}
-            disabled={item.disabled || !!running || needsAuth}
-          >
-            <div className="action-text">
-              <span className="action-title">{item.title}</span>
-              <span className="action-subtitle">{item.subtitle}</span>
-            </div>
-            <span className="action-arrow">›</span>
-          </button>
-        ))}
-      </main>
 
       <footer className="status-bar">
         {phase === 'running' && (

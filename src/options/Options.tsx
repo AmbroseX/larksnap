@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import type { ExtensionConfig } from '../shared/types';
+import type { ExtensionConfig, WebCopyConfig } from '../shared/types';
 import { DEFAULT_CONFIG, MSG } from '../shared/constants';
 import { getConfig, saveConfig } from '../shared/storage';
 import { sendToBackground } from '../shared/messaging';
@@ -27,6 +27,14 @@ export function Options() {
 
   const update = <K extends keyof ExtensionConfig>(key: K, value: ExtensionConfig[K]) => {
     setConfig((prev) => ({ ...prev, [key]: value }));
+    setSaved(false);
+  };
+
+  const updateWebcopy = <K extends keyof WebCopyConfig>(
+    key: K,
+    value: WebCopyConfig[K]
+  ) => {
+    setConfig((prev) => ({ ...prev, webcopy: { ...prev.webcopy, [key]: value } }));
     setSaved(false);
   };
 
@@ -68,6 +76,69 @@ export function Options() {
           />
           诊断信息中包含页面快照
         </label>
+      </section>
+
+      <h2>网页复制</h2>
+
+      <section className="field checkbox">
+        <label>
+          <input
+            type="checkbox"
+            checked={config.webcopy.autoCopyEnabled}
+            onChange={(e) => updateWebcopy('autoCopyEnabled', e.target.checked)}
+          />
+          选中文字自动复制（需在页面上激活过网页复制后生效）
+        </label>
+      </section>
+
+      <section className="field">
+        <label>自动复制的最小选中字符数</label>
+        <input
+          type="number"
+          min={1}
+          max={100}
+          value={config.webcopy.autoCopyMinChars}
+          onChange={(e) =>
+            updateWebcopy(
+              'autoCopyMinChars',
+              Math.max(1, Number(e.target.value) || 5)
+            )
+          }
+        />
+      </section>
+
+      <section className="field">
+        <label>自动复制格式</label>
+        <select
+          value={config.webcopy.autoCopyFormat}
+          onChange={(e) =>
+            updateWebcopy(
+              'autoCopyFormat',
+              e.target.value as WebCopyConfig['autoCopyFormat']
+            )
+          }
+        >
+          <option value="text">纯文本</option>
+          <option value="markdown">Markdown（保留格式）</option>
+        </select>
+      </section>
+
+      <section className="field">
+        <label>「复制全部标签页」输出格式</label>
+        <select
+          value={config.webcopy.tabCopyFormat}
+          onChange={(e) =>
+            updateWebcopy(
+              'tabCopyFormat',
+              e.target.value as WebCopyConfig['tabCopyFormat']
+            )
+          }
+        >
+          <option value="markdown">Markdown 链接：[标题](URL)</option>
+          <option value="title-url">标题 - URL</option>
+          <option value="title">仅标题</option>
+          <option value="url">仅 URL</option>
+        </select>
       </section>
 
       <button className="save-btn" onClick={handleSave}>
