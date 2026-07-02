@@ -1,0 +1,10 @@
+<svg width="128" height="128" viewBox="0 0 128 128" xmlns="http://www.w3.org/2000/svg">
+  <!-- larksnap 图标：飞书蓝底 + 白色文档（折角）+ 蓝色下箭头（导出/存下） -->
+  <rect x="0" y="0" width="128" height="128" rx="26" fill="#3370FF"/>
+  <!-- 文档主体（白色，右上折角） -->
+  <path d="M42 20 H78 L94 36 V100 Q94 108 86 108 H42 Q34 108 34 100 V28 Q34 20 42 20 Z" fill="#FFFFFF"/>
+  <!-- 折角小翻片 -->
+  <path d="M78 20 V32 Q78 36 82 36 H94 Z" fill="#B7CCF6"/>
+  <!-- 下箭头（导出） -->
+  <path d="M64 92 L44 68 H54 V48 H74 V68 H84 Z" fill="#3370FF"/>
+</svg>

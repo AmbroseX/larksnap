@@ -2,8 +2,9 @@
 #
 # 飞书文档导出助手 - 扩展打包脚本
 # 用法:
-#   ./build.sh          # 构建 + 混淆 → dist/ 目录（可直接加载未打包扩展）
+#   ./build.sh          # 构建 → dist/ 目录（可直接加载未打包扩展；默认不混淆）
 #   ./build.sh --zip    # 构建 + 打包成 .zip（用于 Chrome Web Store 上传）
+#   混淆需显式开启：OBFUSCATE=1 ./build.sh（商店禁止混淆，勿用于上传包）
 #
 set -euo pipefail
 
@@ -26,7 +27,7 @@ do_build() {
 
 do_zip() {
   mkdir -p "$RELEASE_DIR"
-  local zip_name="feishu2md-v${VERSION}-${TIMESTAMP}.zip"
+  local zip_name="larksnap-v${VERSION}-${TIMESTAMP}.zip"
   local zip_path="$RELEASE_DIR/$zip_name"
   log "打包 ZIP: $zip_name"
   cd "$DIST_DIR"

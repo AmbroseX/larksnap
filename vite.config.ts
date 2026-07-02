@@ -8,6 +8,7 @@ import {
   existsSync,
   appendFileSync,
   readdirSync,
+  cpSync,
 } from 'fs';
 import { build as esbuild } from 'esbuild';
 import JavaScriptObfuscator from 'javascript-obfuscator';
@@ -71,8 +72,20 @@ export default defineConfig(({ mode }) => {
             JSON.stringify(manifest, null, 2)
           );
 
-          // 生产模式：对所有 JS 文件进行代码混淆
-          if (!isDev) {
+          // 拷贝图标到 dist（manifest 里以 icons/icon-*.png 引用）
+          const iconsSrc = resolve(__dirname, 'icons');
+          if (existsSync(iconsSrc)) {
+            for (const f of readdirSync(iconsSrc)) {
+              if (f.endsWith('.png')) {
+                cpSync(resolve(iconsSrc, f), resolve(distDir, 'icons', f));
+              }
+            }
+          }
+
+          // 代码混淆：默认关闭。Chrome 应用商店禁止上架混淆代码（minify 可以，
+          // obfuscate 会被打回），开源版本也应保持可读。需要保护逻辑的私有构建
+          // 用 `OBFUSCATE=1 npm run build` 显式开启。
+          if (!isDev && process.env.OBFUSCATE === '1') {
             const obfuscateOptions = {
               compact: true,
               controlFlowFlattening: true,
