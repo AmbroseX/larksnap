@@ -223,6 +223,16 @@ npm run build      # production build + obfuscation → dist/
 - [ ] Any web page → Markdown generic pipeline (Readability + Turndown)
 - [ ] Multi-doc / knowledge-base batch export
 
+## Acknowledgments
+
+All code in this project is an independent implementation. The design drew ideas from the following open-source projects — thanks to their authors:
+
+- [Wsine/feishu2md](https://github.com/Wsine/feishu2md) — block-assembly approach over the OpenAPI route
+- [dtsola/xiaoyaosearch-feishu-export-md](https://github.com/dtsola/xiaoyaosearch-feishu-export-md) — block-type → Markdown mapping design
+- [sancijun/feishu-doc-helper](https://github.com/sancijun/feishu-doc-helper) / [sancijun/doc-export-helper](https://github.com/sancijun/doc-export-helper) — validation of the cookie-based internal-API route
+- [dicarne/feishu-backup](https://github.com/dicarne/feishu-backup), [eternalfree/feishu-doc-export](https://github.com/eternalfree/feishu-doc-export) — batch-export approach comparison
+- [jackwener/OpenCLI](https://github.com/jackwener/OpenCLI) — architecture ideas for the local bridge daemon
+
 ## License
 
 Released under the [Apache License 2.0](LICENSE). You may freely use, modify, distribute, and use it commercially, provided you retain the copyright notice and license text; the license also grants patent rights and includes trademark-protection terms.

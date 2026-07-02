@@ -223,6 +223,16 @@ npm run build      # 生产构建 + 代码混淆 → dist/
 - [ ] 任意网页 → Markdown 通用通道（Readability + Turndown）
 - [ ] 多文档 / 知识库批量导出
 
+## 致谢
+
+本项目代码为独立实现，设计过程中参考了以下开源项目的思路，在此致谢：
+
+- [Wsine/feishu2md](https://github.com/Wsine/feishu2md) — OpenAPI 路线的块拼装思路
+- [dtsola/xiaoyaosearch-feishu-export-md](https://github.com/dtsola/xiaoyaosearch-feishu-export-md) — 块类型 → Markdown 的映射设计
+- [sancijun/feishu-doc-helper](https://github.com/sancijun/feishu-doc-helper) / [sancijun/doc-export-helper](https://github.com/sancijun/doc-export-helper) — Cookie 复用内部接口的路线验证
+- [dicarne/feishu-backup](https://github.com/dicarne/feishu-backup)、[eternalfree/feishu-doc-export](https://github.com/eternalfree/feishu-doc-export) — 批量导出方案对比
+- [jackwener/OpenCLI](https://github.com/jackwener/OpenCLI) — 本地桥接 daemon 的架构思路
+
 ## 许可证
 
 本项目以 [Apache License 2.0](LICENSE) 开源。你可以自由使用、修改、分发与商用，需保留版权声明与许可证文本；协议同时提供专利授权与商标保护条款。
