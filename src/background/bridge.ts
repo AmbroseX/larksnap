@@ -10,7 +10,7 @@
 // 端口/路径需与 skills/feishu-doc-fetch/scripts/bridge/protocol.mjs 保持一致。
 import type { DocInfo, ExportProgress, Response } from '../shared/types';
 import { CONTENT_MSG } from '../shared/constants';
-import { detectDocFromUrl } from '../content/feishu-detect';
+import { detectDocFromUrl, stripSiteSuffix } from '../content/feishu-detect';
 import { hasPermissionForHost } from './permissions';
 import { setContentTab } from './feishu-proxy';
 import { setDownloadSink } from './download';
@@ -240,6 +240,15 @@ async function runJob(job: Job): Promise<void> {
       if (full?.isFeishuDoc) doc = full;
     } catch {
       /* 退回 URL 信息 */
+    }
+    // 标题兜底：DOM 没取到就用标签页标题，避免文件名退化成 token
+    if (!doc.title) {
+      try {
+        const tab = await chrome.tabs.get(tabId);
+        if (tab.title) doc.title = stripSiteSuffix(tab.title);
+      } catch {
+        /* 忽略 */
+      }
     }
 
     const fmt = (job.format || 'md').toLowerCase();

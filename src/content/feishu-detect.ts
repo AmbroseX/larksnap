@@ -59,6 +59,16 @@ export function detectDocFromUrl(url: string): DocInfo {
   return base;
 }
 
+/** 去掉浏览器标签标题里的站点后缀（飞书 / Lark 各语言变体） */
+export function stripSiteSuffix(title: string): string {
+  return title
+    .replace(
+      /\s*[-–—]\s*(飞书云文档|飞书文档|飞书|Feishu(\s+Docs?)?|Lark(\s+Docs?|\s+Suite)?)\s*$/i,
+      ''
+    )
+    .trim();
+}
+
 /** 尽力从 DOM 中提取文档标题 */
 export function extractTitle(): string {
   // 飞书文档标题通常在页面顶部的可编辑标题区域，先用通用回退
@@ -73,7 +83,7 @@ export function extractTitle(): string {
     const text = (el as HTMLInputElement)?.value || el?.textContent;
     if (text && text.trim()) return text.trim();
   }
-  return document.title.replace(/ - 飞书.*$/, '').trim() || document.title;
+  return stripSiteSuffix(document.title) || document.title;
 }
 
 /** 组合 URL + DOM，得到完整的当前页文档信息 */

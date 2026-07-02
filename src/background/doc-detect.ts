@@ -1,6 +1,6 @@
 import type { DocInfo } from '../shared/types';
 import { CONTENT_MSG } from '../shared/constants';
-import { detectDocFromUrl } from '../content/feishu-detect';
+import { detectDocFromUrl, stripSiteSuffix } from '../content/feishu-detect';
 import { hostOf } from '../shared/feishu-host';
 import { hasPermissionForHost } from './permissions';
 
@@ -26,6 +26,9 @@ export async function detectActiveDoc(): Promise<DocInfo | null> {
   const urlInfo = detectDocFromUrl(tab.url);
   if (!urlInfo.isFeishuDoc) return urlInfo;
 
+  // 标签页标题兜底：DOM 取不到标题时至少还有网页名，避免文件名退化成 token
+  if (tab.title) urlInfo.title = stripSiteSuffix(tab.title);
+
   const granted = await hasPermissionForHost(hostOf(tab.url));
   if (!granted) {
     return { ...urlInfo, needsAuth: true };
@@ -40,7 +43,11 @@ export async function detectActiveDoc(): Promise<DocInfo | null> {
     const full = (await chrome.tabs.sendMessage(tab.id, {
       type: CONTENT_MSG.DETECT_DOC,
     })) as DocInfo | undefined;
-    return full ?? urlInfo;
+    if (full?.isFeishuDoc) {
+      if (!full.title) full.title = urlInfo.title;
+      return full;
+    }
+    return urlInfo;
   } catch {
     // 注入失败（如尚未生效的权限）：退回 URL 信息
     return urlInfo;
