@@ -1,6 +1,6 @@
 {
   "name": "larksnap",
-  "version": "0.2.3",
+  "version": "0.2.4",
   "private": true,
   "description": "飞书 / Lark 文档导出浏览器扩展（MV3）—— 持登录态直导私有化部署与「官方导出已关闭」的文档，并可桥接 Claude Code / CLI 落到本地目录",
   "keywords": [
