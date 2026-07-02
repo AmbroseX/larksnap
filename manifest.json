@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "飞书文档导出助手",
-  "version": "0.2.4",
-  "description": "在飞书文档页面一键导出为 Markdown / PDF / HTML，批量下载附件，支持离线缓存。",
+  "version": "0.2.5",
+  "description": "在飞书文档页面一键导出为 Markdown / PDF / HTML，批量下载附件，支持离线缓存；任意网页一键转 Markdown、解除复制限制、选中自动复制。",
   "permissions": [
     "cookies",
     "tabs",
@@ -32,6 +32,7 @@
   },
   "action": {
     "default_title": "飞书文档导出助手",
+    "default_popup": "popup.html",
     "default_icon": {
       "16": "icons/icon-16.png",
       "32": "icons/icon-32.png",

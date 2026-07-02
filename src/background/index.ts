@@ -32,27 +32,10 @@ startBridge();
 // webcopy：右键菜单注册与分发（与飞书导出平行，互不干扰）
 setupWebcopy();
 
-// ==================== 点击图标打开侧边栏 ====================
-chrome.sidePanel
-  ?.setPanelBehavior?.({ openPanelOnActionClick: true })
-  .catch(() => {});
-
-chrome.action.onClicked.addListener(async (tab) => {
-  if (!tab.id) return;
-  try {
-    await chrome.sidePanel.setOptions({
-      tabId: tab.id,
-      path: 'sidepanel.html',
-      enabled: true,
-    });
-    await (chrome.sidePanel as { open: (o: unknown) => Promise<void> }).open({
-      tabId: tab.id,
-    });
-  } catch (e) {
-    console.warn('[feishu2md] 打开侧边栏失败:', e);
-  }
-});
-
+// 点击图标弹出状态 popup（manifest 的 default_popup），侧边栏从 popup 里的按钮打开。
+// 注意：openPanelOnActionClick 是浏览器持久化的设置，旧版本设过 true，必须显式改回
+// false，否则点图标仍然开侧边栏、popup 不会显示。
+chrome.sidePanel?.setPanelBehavior?.({ openPanelOnActionClick: false }).catch(() => {});
 // ==================== 消息路由 ====================
 chrome.runtime.onMessage.addListener((message: Message, sender, sendResponse) => {
   handleMessage(message, sender)

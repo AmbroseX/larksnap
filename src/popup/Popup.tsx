@@ -1,6 +1,6 @@
 /**
  * Popup —— 展示桥接（CC ⇄ daemon）连接状态：扩展版本、连接态、daemon 版本、profile code。
- * 仿 OpenCLI popup。点击图标默认打开侧边栏（见 background）；此弹窗用于看状态/复制 profile。
+ * 仿 OpenCLI popup。点击图标弹出本窗口（manifest default_popup）；侧边栏从底部按钮打开。
  */
 import { useEffect, useState } from 'react';
 import { MSG } from '../shared/constants';
@@ -60,9 +60,22 @@ export function Popup() {
     }
   };
 
+  // popup 内的点击是用户手势，可以直接开侧边栏；开完关掉自己
+  const openSidePanel = async () => {
+    try {
+      const win = await chrome.windows.getCurrent();
+      if (win.id == null) return;
+      await chrome.sidePanel.open({ windowId: win.id });
+      window.close();
+    } catch (e) {
+      console.warn('[feishu2md] 打开侧边栏失败:', e);
+    }
+  };
+
   return (
     <div className="popup">
       <header className="hd">
+        <img className="logo" src="icons/icon-32.png" alt="" />
         <h1>飞书文档导出助手</h1>
         {status && <span className="ver">v{status.extensionVersion}</span>}
       </header>
@@ -92,6 +105,20 @@ export function Popup() {
           </div>
         )}
       </div>
+
+      <footer className="ft">
+        <button type="button" className="panel-btn" onClick={openSidePanel}>
+          打开侧边栏
+        </button>
+        <a
+          className="doc-link"
+          href="https://github.com/AmbroseX/larksnap#readme"
+          target="_blank"
+          rel="noreferrer"
+        >
+          使用文档
+        </a>
+      </footer>
     </div>
   );
 }

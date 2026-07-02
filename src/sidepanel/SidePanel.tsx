@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useRef } from 'react';
 import type { DocInfo, ExportProgress, RuntimeState } from '../shared/types';
 import { MSG } from '../shared/constants';
 import { sendToBackground, onBackgroundMessage } from '../shared/messaging';
@@ -10,25 +10,41 @@ import { WebCopyView } from './WebCopyView';
 
 type View = 'home' | 'cache';
 
+const IDLE_TEXT = '准备就绪，等待操作...';
+
 export function SidePanel() {
   const [view, setView] = useState<View>('home');
-  const [status, setStatus] = useState('准备就绪，等待操作...');
+  const [status, setStatus] = useState(IDLE_TEXT);
   const [running, setRunning] = useState<string | null>(null);
   const [percent, setPercent] = useState<number | null>(null);
   const [phase, setPhase] = useState<ExportProgress['status']>('idle');
   const [doc, setDoc] = useState<DocInfo | null>(null);
   const [authing, setAuthing] = useState(false);
 
+  const resetTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   const refreshDoc = useCallback(async () => {
     const res = await sendToBackground<DocInfo>(MSG.GET_DOC_INFO);
     if (res.success) setDoc(res.data ?? null);
+  }, []);
+
+  // 成功提示挂几秒就够了，自动回到"准备就绪"；出错的提示保留给用户看
+  const armIdleReset = useCallback(() => {
+    if (resetTimer.current) clearTimeout(resetTimer.current);
+    resetTimer.current = setTimeout(() => {
+      resetTimer.current = null;
+      setStatus(IDLE_TEXT);
+      setPhase('idle');
+      setPercent(null);
+    }, 4000);
   }, []);
 
   // 启动时拉取上次进度 + 当前文档信息，并订阅后续进度推送
   useEffect(() => {
     sendToBackground<RuntimeState>(MSG.GET_STATUS).then((res) => {
       const last = res.success ? res.data?.lastProgress : null;
-      if (last) {
+      // 只恢复进行中的任务；上次已完成/失败的旧提示不再翻出来
+      if (last && last.status === 'running') {
         setStatus(last.message);
         setPhase(last.status);
         setPercent(last.percent ?? null);
@@ -36,16 +52,26 @@ export function SidePanel() {
     });
     refreshDoc();
 
-    return onBackgroundMessage((msg) => {
+    const off = onBackgroundMessage((msg) => {
       if (msg.type === MSG.PROGRESS) {
         const p = msg.data as ExportProgress;
         setStatus(p.message);
         setPhase(p.status);
         setPercent(p.percent ?? null);
         if (p.status !== 'running') setRunning(null);
+        if (p.status === 'success') {
+          armIdleReset();
+        } else if (resetTimer.current) {
+          clearTimeout(resetTimer.current);
+          resetTimer.current = null;
+        }
       }
     });
-  }, [refreshDoc]);
+    return () => {
+      off();
+      if (resetTimer.current) clearTimeout(resetTimer.current);
+    };
+  }, [refreshDoc, armIdleReset]);
 
   // 私有化未授权：用户手势触发 chrome.permissions.request（必须在页面上下文调用）
   const handleAuthorize = useCallback(async () => {
@@ -112,6 +138,14 @@ export function SidePanel() {
         <div className="title-row">
           <h1>飞书文档导出助手</h1>
           <span className="badge badge-free">限时免费</span>
+          <button
+            type="button"
+            className="close-btn"
+            title="关闭侧边栏"
+            onClick={() => window.close()}
+          >
+            ✕
+          </button>
         </div>
         <p className="subtitle">
           {doc?.isFeishuDoc
