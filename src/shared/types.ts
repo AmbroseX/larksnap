@@ -73,6 +73,21 @@ export interface CachedDoc {
 
 // ==================== 配置 / 运行时状态 ====================
 
+/** 标签页复制的输出格式 */
+export type TabCopyFormat = 'markdown' | 'title-url' | 'title' | 'url';
+
+/** 网页复制（webcopy）配置 */
+export interface WebCopyConfig {
+  /** 选中文字自动复制开关 */
+  autoCopyEnabled: boolean;
+  /** 自动复制的最小选中字符数 */
+  autoCopyMinChars: number;
+  /** 自动复制格式 */
+  autoCopyFormat: 'text' | 'markdown';
+  /** 标签页复制格式 */
+  tabCopyFormat: TabCopyFormat;
+}
+
 /** 插件配置（持久化在 chrome.storage.local） */
 export interface ExtensionConfig {
   /** 导出 Markdown 时图片处理方式 */
@@ -83,6 +98,29 @@ export interface ExtensionConfig {
   diagnosticIncludeSnapshot: boolean;
   /** 已运行时授权的私有化域名 origin 列表（如 https://x.私有化租户.com） */
   trustedDomains: string[];
+  /** 网页复制（任意网页转 Markdown / 解锁 / 自动复制） */
+  webcopy: WebCopyConfig;
+}
+
+// ==================== 网页复制（webcopy） ====================
+
+/** 整页 / 选区转换结果 */
+export interface WebCopyMdResult {
+  markdown: string;
+  title: string;
+}
+
+/** webcopy 在某标签页上的挂载状态（未注入过则 mounted=false） */
+export interface WebCopyState {
+  mounted: boolean;
+  unlocked: boolean;
+}
+
+/** 侧边栏注入失败时的兜底信息：需在 UI 手势里发起 permissions.request */
+export interface WebCopyNeedsPermission {
+  needsPermission: true;
+  /** 授权用 origin pattern，如 *://example.com/* */
+  originPattern: string;
 }
 
 // ==================== Markdown 导出能力（按 host 缓存） ====================

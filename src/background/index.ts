@@ -13,11 +13,24 @@ import { exportDiagnostic } from './diagnostic';
 import { getCookie } from './cookie';
 import { hasPermissionForHost, recordTrusted, revokePermission, listTrusted } from './permissions';
 import { startBridge, getBridgeStatus } from './bridge';
+import {
+  setupWebcopy,
+  webcopyPageMd,
+  webcopySelectionMd,
+  webcopyToggleUnlock,
+  webcopyEnsure,
+  webcopyGetState,
+  copyTabs,
+} from './webcopy';
+import type { TabCopyFormat } from '../shared/types';
 
 console.log('[feishu2md] Service Worker 启动');
 
 // CC ⇄ 扩展 桥接：连原生宿主、长连保活、接收远程导出任务
 startBridge();
+
+// webcopy：右键菜单注册与分发（与飞书导出平行，互不干扰）
+setupWebcopy();
 
 // ==================== 点击图标打开侧边栏 ====================
 chrome.sidePanel
@@ -158,6 +171,31 @@ async function handleMessage(
     case MSG.EXPORT_DIAGNOSTIC: {
       const doc = await detectActiveDoc();
       return exportDiagnostic(doc);
+    }
+
+    // ---------- 网页复制（webcopy） ----------
+    case MSG.WEBCOPY_PAGE_MD: {
+      return webcopyPageMd();
+    }
+    case MSG.WEBCOPY_SELECTION_MD: {
+      return webcopySelectionMd();
+    }
+    case MSG.WEBCOPY_TOGGLE_UNLOCK: {
+      const { enabled } = (message.data || {}) as { enabled?: boolean };
+      return webcopyToggleUnlock(!!enabled);
+    }
+    case MSG.WEBCOPY_ENSURE: {
+      return webcopyEnsure();
+    }
+    case MSG.WEBCOPY_GET_STATE: {
+      return webcopyGetState();
+    }
+    case MSG.COPY_TABS: {
+      const { scope, format } = (message.data || {}) as {
+        scope?: 'current' | 'all';
+        format?: TabCopyFormat;
+      };
+      return copyTabs(scope ?? 'all', format ?? 'markdown');
     }
 
     default:

@@ -1,6 +1,6 @@
 {
   "name": "larksnap",
-  "version": "0.2.2",
+  "version": "0.2.3",
   "private": true,
   "description": "飞书 / Lark 文档导出浏览器扩展（MV3）—— 持登录态直导私有化部署与「官方导出已关闭」的文档，并可桥接 Claude Code / CLI 落到本地目录",
   "keywords": [
@@ -31,15 +31,19 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@mozilla/readability": "^0.6.0",
     "jszip": "^3.10.1",
     "marked": "^18.0.5",
     "react": "^18.3.1",
-    "react-dom": "^18.3.1"
+    "react-dom": "^18.3.1",
+    "turndown": "^7.2.4",
+    "turndown-plugin-gfm": "^1.0.2"
   },
   "devDependencies": {
     "@types/chrome": "^0.0.270",
     "@types/react": "^18.3.5",
     "@types/react-dom": "^18.3.0",
+    "@types/turndown": "^5.0.6",
     "@vitejs/plugin-react": "^4.3.1",
     "esbuild": "^0.21.0",
     "javascript-obfuscator": "^5.4.1",

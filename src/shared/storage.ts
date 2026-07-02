@@ -11,7 +11,13 @@ import { STORAGE_KEYS, DEFAULT_CONFIG } from './constants';
 /** 读取插件配置 */
 export async function getConfig(): Promise<ExtensionConfig> {
   const result = await chrome.storage.local.get(STORAGE_KEYS.CONFIG);
-  return { ...DEFAULT_CONFIG, ...result[STORAGE_KEYS.CONFIG] };
+  const stored = (result[STORAGE_KEYS.CONFIG] ?? {}) as Partial<ExtensionConfig>;
+  return {
+    ...DEFAULT_CONFIG,
+    ...stored,
+    // 嵌套对象单独合并，避免老版本存量配置缺新字段
+    webcopy: { ...DEFAULT_CONFIG.webcopy, ...stored.webcopy },
+  };
 }
 
 /** 保存（合并）插件配置 */

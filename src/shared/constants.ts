@@ -45,6 +45,16 @@ export const MSG = {
   LIST_TRUSTED: 'list_trusted',
   // 背景 → UI 的进度推送
   PROGRESS: 'progress',
+  // 网页复制（webcopy，侧边栏发起时由侧边栏写剪贴板/下载）
+  WEBCOPY_PAGE_MD: 'webcopy_page_md',
+  WEBCOPY_SELECTION_MD: 'webcopy_selection_md',
+  WEBCOPY_TOGGLE_UNLOCK: 'webcopy_toggle_unlock',
+  /** 查询当前标签页 webcopy 挂载状态（不注入，零侵入） */
+  WEBCOPY_GET_STATE: 'webcopy_get_state',
+  /** 仅确保 webcopy 已注入当前标签页（自动复制开关生效用） */
+  WEBCOPY_ENSURE: 'webcopy_ensure',
+  // 标签页链接复制
+  COPY_TABS: 'copy_tabs',
 } as const;
 
 /** content script 内部消息类型（背景 → content） */
@@ -57,6 +67,15 @@ export const CONTENT_MSG = {
   DOWNLOAD_MEDIA: 'download_media',
   /** 滚动加载全文（懒加载内容） */
   SCROLL_LOAD: 'scroll_load',
+  // ---- webcopy（SW → webcopy.js，与飞书 content 消息互不相干）----
+  /** 整页转 Markdown：data={ writeClipboard? } */
+  WEBCOPY_PAGE_TO_MD: 'webcopy_page_to_md',
+  /** 选区转 Markdown：data={ writeClipboard? } */
+  WEBCOPY_SELECTION_TO_MD: 'webcopy_selection_to_md',
+  /** 解锁开关：data={ enabled? }，缺省则取反（右键菜单切换用） */
+  WEBCOPY_UNLOCK: 'webcopy_unlock',
+  /** 查询挂载状态（unlocked 等） */
+  WEBCOPY_STATE: 'webcopy_state',
 } as const;
 
 /** POST 校验用的 CSRF cookie 候选名（按序尝试，失败换名重试） */
@@ -74,4 +93,10 @@ export const DEFAULT_CONFIG: ExtensionConfig = {
   feedbackUrl: 'https://github.com/your-org/feishu2md-extension/issues/new',
   diagnosticIncludeSnapshot: true,
   trustedDomains: [],
+  webcopy: {
+    autoCopyEnabled: false,
+    autoCopyMinChars: 5,
+    autoCopyFormat: 'text',
+    tabCopyFormat: 'markdown',
+  },
 };

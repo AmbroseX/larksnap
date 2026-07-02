@@ -38,6 +38,17 @@ export default defineConfig(({ mode }) => {
             tsconfig: resolve(__dirname, 'tsconfig.json'),
           });
 
+          // webcopy 独立入口：turndown/readability 只进这个包，飞书导出路径体积不变
+          await esbuild({
+            entryPoints: [resolve(__dirname, 'src/content/webcopy/index.ts')],
+            bundle: true,
+            format: 'iife',
+            outfile: resolve(distDir, 'webcopy.js'),
+            sourcemap: isDev ? 'inline' : false,
+            target: 'chrome110',
+            tsconfig: resolve(__dirname, 'tsconfig.json'),
+          });
+
           // 读取 manifest 并写入 dist（把 background 入口换成编译后的 JS）
           const manifest = JSON.parse(
             readFileSync(resolve(__dirname, 'manifest.json'), 'utf-8')
