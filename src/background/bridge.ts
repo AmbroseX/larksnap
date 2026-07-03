@@ -22,6 +22,9 @@ import { exportHtml } from './exporters/html';
 const PORT = 19925;
 const PING_URL = `http://127.0.0.1:${PORT}/ping`;
 const WS_URL = `ws://127.0.0.1:${PORT}/ext`;
+// 需与 skills/larksnap-fetch/scripts/bridge/protocol.mjs 的 PROTOCOL_VERSION 一致；
+// welcome 里对不上时置 protocolMismatch 提示用户更新（不硬断，避免升级期间全瘫）。
+const PROTOCOL_VERSION = 1;
 const KEEPALIVE_ALARM = 'larksnap-bridge-keepalive';
 const RECONNECT_BASE = 2000;
 const RECONNECT_MAX = 5000;
@@ -31,6 +34,7 @@ let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 let reconnectAttempts = 0;
 let connecting = false;
 let daemonVersion: string | null = null;
+let protocolMismatch = false; // daemon 协议版本与本扩展不一致（提示更新 skill/扩展）
 let contextId: string | null = null;
 
 const CONTEXT_ID_KEY = 'larksnap:bridge:context-id';
@@ -71,6 +75,7 @@ export async function getBridgeStatus(): Promise<{
   connected: boolean;
   reconnecting: boolean;
   daemonVersion: string | null;
+  protocolMismatch: boolean;
   contextId: string;
   extensionVersion: string;
 }> {
@@ -78,6 +83,7 @@ export async function getBridgeStatus(): Promise<{
     connected: ws?.readyState === WebSocket.OPEN,
     reconnecting: reconnectTimer != null,
     daemonVersion,
+    protocolMismatch,
     contextId: await getContextId(),
     extensionVersion: chrome.runtime.getManifest().version,
   };
@@ -125,6 +131,7 @@ async function connect(): Promise<void> {
         JSON.stringify({
           type: 'hello',
           version: chrome.runtime.getManifest().version,
+          protocolVersion: PROTOCOL_VERSION,
           contextId: cid,
         })
       );
@@ -138,6 +145,7 @@ async function connect(): Promise<void> {
       if (ws === sock) {
         ws = null;
         daemonVersion = null;
+        protocolMismatch = false;
       }
       scheduleReconnect();
     };
@@ -179,7 +187,15 @@ async function onMessage(raw: string): Promise<void> {
     return;
   }
   if (msg.type === 'welcome') {
-    daemonVersion = (msg as { daemonVersion?: string }).daemonVersion ?? null;
+    const w = msg as { daemonVersion?: string; protocolVersion?: number };
+    daemonVersion = w.daemonVersion ?? null;
+    // 旧 daemon 不回 protocolVersion → 也视为不一致（提示更新 skill）
+    protocolMismatch = w.protocolVersion !== PROTOCOL_VERSION;
+    if (protocolMismatch) {
+      console.warn(
+        `[larksnap] 桥接协议版本不一致（扩展 v${PROTOCOL_VERSION} / daemon ${w.protocolVersion ?? '未知'}），请更新 larksnap-fetch 技能或重新构建扩展`
+      );
+    }
     return;
   }
   if (msg.type === 'job' && msg.id && msg.url) {

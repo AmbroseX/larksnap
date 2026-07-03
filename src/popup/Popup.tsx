@@ -10,6 +10,7 @@ interface BridgeStatus {
   connected: boolean;
   reconnecting: boolean;
   daemonVersion: string | null;
+  protocolMismatch: boolean;
   contextId: string;
   extensionVersion: string;
 }
@@ -96,6 +97,12 @@ export function Popup() {
             <button type="button" className={`copy-btn ${copied ? 'copied' : ''}`} onClick={copy}>
               {copied ? 'Copied' : 'Copy'}
             </button>
+          </div>
+        )}
+
+        {phase === 'connected' && status?.protocolMismatch && (
+          <div className="hint">
+            ⚠ 桥接协议版本不一致：请更新 larksnap-fetch 技能（或重新构建加载扩展），否则导出可能异常。
           </div>
         )}
 

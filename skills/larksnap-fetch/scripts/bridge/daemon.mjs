@@ -15,13 +15,19 @@ import {
   PORT,
   WS_PATH,
   AUTH_HEADER,
+  SIG_HEADER,
   LOG_PATH,
+  PID_PATH,
   DAEMON_VERSION,
+  PROTOCOL_VERSION,
   ensureHomeDir,
   attachWsServer,
+  loadOrCreateSecret,
+  verifySigHeader,
 } from './protocol.mjs';
 
 ensureHomeDir();
+const SECRET = loadOrCreateSecret();
 function log(...a) {
   try {
     fs.appendFileSync(LOG_PATH, `[${new Date().toISOString()}] ${a.join(' ')}\n`);
@@ -35,20 +41,25 @@ const pending = new Map(); // jobId -> { res, contextId }（CLI 流式响应）
 let jobSeq = 0;
 let idleTimer = null;
 
-/** 路由到目标扩展连接。返回 { conn } 或 { error }。 */
+/** 路由到目标扩展连接。返回 { conn } 或 { error, subtype }（subtype 供 CLI 错误契约分支）。 */
 function resolveConn(contextId) {
   if (contextId) {
     const conn = extConns.get(contextId);
     if (conn) return { conn };
     return {
+      subtype: 'profile_not_found',
       error: `未找到 profile「${contextId}」。当前已连接: ${[...extConns.keys()].join(', ') || '(无)'}`,
     };
   }
   if (extConns.size === 0) {
-    return { error: '扩展未连接：请确认 Chrome 已打开并加载 larksnap 扩展，点一下图标唤醒后台后重试。' };
+    return {
+      subtype: 'extension_not_connected',
+      error: '扩展未连接：请确认 Chrome 已打开并加载 larksnap 扩展，点一下图标唤醒后台后重试。',
+    };
   }
   if (extConns.size === 1) return { conn: [...extConns.values()][0] };
   return {
+    subtype: 'profile_ambiguous',
     error: `检测到多个浏览器 profile（${[...extConns.keys()].join(', ')}），请用 --profile <code> 指定其一。`,
   };
 }
@@ -94,9 +105,37 @@ const httpServer = createServer(async (req, res) => {
     return;
   }
 
-  // 其余端点要求自定义头（网页发不出，预检又被拒）
+  // 其余端点要求自定义头（网页发不出，预检又被拒）+ HMAC 签名（防本机其他身份冒充，无回落）
   if (!req.headers[AUTH_HEADER]) {
     res.writeHead(403).end('missing auth header');
+    return;
+  }
+  let rawBody = '';
+  if (req.method === 'POST') {
+    try {
+      rawBody = await readBody(req);
+    } catch {
+      res.writeHead(400).end('bad body');
+      return;
+    }
+  }
+  if (!verifySigHeader(SECRET, req.headers[SIG_HEADER], req.method, pathname, rawBody)) {
+    log('signature reject', req.method, pathname);
+    if (pathname === '/command') {
+      // 用 NDJSON 错误行回，新旧 CLI 都能给出可读提示
+      res.writeHead(200, { 'content-type': 'application/x-ndjson' });
+      res.end(
+        JSON.stringify({
+          type: 'error',
+          subtype: 'signature_invalid',
+          message: '请求签名无效：CLI 与 daemon 的密钥/版本不一致，请更新 larksnap-fetch 技能后重试。',
+        }) + '\n'
+      );
+    } else {
+      res
+        .writeHead(401, { 'content-type': 'application/json' })
+        .end(JSON.stringify({ ok: false, error: 'bad signature' }));
+    }
     return;
   }
 
@@ -117,7 +156,7 @@ const httpServer = createServer(async (req, res) => {
   if (req.method === 'POST' && pathname === '/command') {
     let job;
     try {
-      job = JSON.parse(await readBody(req));
+      job = JSON.parse(rawBody);
     } catch {
       res.writeHead(400).end('bad json');
       return;
@@ -129,7 +168,7 @@ const httpServer = createServer(async (req, res) => {
     const routed = resolveConn(job.contextId);
     if (routed.error) {
       res.writeHead(200, { 'content-type': 'application/x-ndjson' });
-      res.end(JSON.stringify({ type: 'error', message: routed.error }) + '\n');
+      res.end(JSON.stringify({ type: 'error', subtype: routed.subtype, message: routed.error }) + '\n');
       return;
     }
     // 流式响应：进度/结果逐行写回，结束时 end
@@ -200,9 +239,19 @@ attachWsServer(httpServer, {
         const cid = (msg.contextId && String(msg.contextId)) || 'default';
         conn._contextId = cid;
         extConns.set(cid, conn);
-        // 回握手：把 daemon 版本告诉扩展（popup 展示用）
-        conn.send(JSON.stringify({ type: 'welcome', daemonVersion: DAEMON_VERSION }));
-        log('extension hello', cid, msg.version || '');
+        // 回握手：daemon 版本（popup 展示）+ 协议版本（不匹配时扩展提示更新，不硬断以免升级期全瘫）
+        const extProto = msg.protocolVersion ?? null;
+        conn.send(
+          JSON.stringify({
+            type: 'welcome',
+            daemonVersion: DAEMON_VERSION,
+            protocolVersion: PROTOCOL_VERSION,
+          })
+        );
+        if (extProto !== null && extProto !== PROTOCOL_VERSION) {
+          log('protocol mismatch', `ext=${extProto}`, `daemon=${PROTOCOL_VERSION}`, cid);
+        }
+        log('extension hello', cid, msg.version || '', `proto=${extProto ?? '(旧扩展未报)'}`);
         return;
       }
       // 业务消息（progress/result/error/need-login/need-auth），按 id 写回 CLI 流
@@ -265,6 +314,21 @@ function armIdle() {
 }
 
 httpServer.listen(PORT, HOST, () => {
-  log('daemon listening', `${HOST}:${PORT}`, 'v' + DAEMON_VERSION);
+  // PID 文件：诊断用（谁在监听）；抢端口失败的实例走上面 http error 退出，不会覆盖赢家的
+  try {
+    fs.writeFileSync(PID_PATH, String(process.pid) + '\n');
+  } catch {
+    /* 忽略 */
+  }
+  log('daemon listening', `${HOST}:${PORT}`, 'v' + DAEMON_VERSION, 'pid=' + process.pid);
   armIdle();
+});
+
+process.on('exit', () => {
+  // 只清理自己的 PID 文件（别的实例可能已接管）
+  try {
+    if (fs.readFileSync(PID_PATH, 'utf8').trim() === String(process.pid)) fs.unlinkSync(PID_PATH);
+  } catch {
+    /* 忽略 */
+  }
 });

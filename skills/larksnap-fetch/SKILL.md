@@ -45,16 +45,78 @@ node ~/.claude/skills/larksnap-fetch/scripts/fetch.mjs <飞书链接> <输出目
 
 退出码:`0` 成功 ｜ `1` 失败 ｜ `2` 用法错 ｜ `3` 需登录 ｜ `4` 需授权域名 ｜ `5` 桥接未就绪。
 
+## 错误契约(AI 按此分支,不要解析散文)
+
+**任何非 0 退出时,stderr 的最后一行是一行 JSON**,前面几行是给人读的散文:
+
+```json
+{"ok":false,"error":{"type":"authentication","subtype":"need_login","message":"需要登录：浏览器里没有该域名的飞书登录态。","hint":"让用户在 Chrome 中打开该文档域名并登录飞书，登录完成后重跑本命令。","retryable":false}}
+```
+
+- `message` = 哪里错了(给人读);`hint` = 下一步做什么(命令式,照着执行);
+- `retryable: true` = 不用改任何东西,直接重跑本命令就可能成功;`false` = 先按 `hint` 行动(通常需要用户操作),再重跑。
+- `type`/`subtype` 是闭合枚举,退出码由 subtype 派生:
+
+| 退出码 | type | subtype | 处理 |
+|---|---|---|---|
+| 2 | usage | `bad_args` / `profile_not_found` / `profile_ambiguous` | 修正命令行参数(如加/改 `--profile`)后重跑 |
+| 3 | authentication | `need_login` | 让用户在 Chrome 登录该域名的飞书,确认后重跑 |
+| 4 | authentication | `need_domain_auth` | 让用户在扩展侧边栏点「授权该域名」,确认后重跑 |
+| 5 | bridge | `daemon_missing` / `daemon_spawn_failed` / `daemon_timeout` / `bridge_request_failed` / `extension_not_connected` / `signature_invalid` | 按 hint 修桥接(多为唤醒扩展)后重跑 |
+| 1 | export | `export_failed` / `write_failed` / `no_result` / `unexpected` | 按 hint 处理 |
+
+## 示例输出
+
+成功(退出码 0,stdout):
+
+```
+✓ 已导出到 /Users/me/notes/无监督数据修复
+   - 无监督数据修复/无监督数据修复.md
+   - 无监督数据修复/images/boxcnAbc123.png
+```
+
+需登录(退出码 3,stderr):
+
+```
+✗ 需要登录：浏览器里没有该域名的飞书登录态。
+  → 让用户在 Chrome 中打开该文档域名并登录飞书，登录完成后重跑本命令。
+{"ok":false,"error":{"type":"authentication","subtype":"need_login","message":"需要登录：浏览器里没有该域名的飞书登录态。","hint":"让用户在 Chrome 中打开该文档域名并登录飞书，登录完成后重跑本命令。","retryable":false}}
+```
+
+扩展未连接(退出码 5,stderr):
+
+```
+✗ 扩展未连接：请确认 Chrome 已打开并加载 larksnap 扩展，点一下图标唤醒后台后重试。
+  → 确认 Chrome 已打开并加载 larksnap 扩展，点一下扩展图标唤醒后台，然后重跑本命令。
+{"ok":false,"error":{"type":"bridge","subtype":"extension_not_connected","message":"...","hint":"...","retryable":true}}
+```
+
+多 profile 需指定(退出码 2,stderr):
+
+```
+✗ 检测到多个浏览器 profile（a1b2c3, d4e5f6），请用 --profile <code> 指定其一。
+  → 加 --profile <code> 指定用哪个浏览器 profile（code 见扩展弹窗，可点 Copy 复制），然后重跑本命令。
+{"ok":false,"error":{"type":"usage","subtype":"profile_ambiguous","message":"...","hint":"...","retryable":false}}
+```
+
 ## 执行流程(CC 按此操作)
 
 1. 直接运行上面的命令(用户给的链接 + 用户指定的本地目录;用户没指定目录时,默认落到当前工作目录)。daemon 会被自动拉起。
-2. 看退出码/输出按下面处理,不要自行猜测重试:
-   - **`5` 桥接未就绪** → daemon 起不来或扩展没连上。确认 Chrome 已打开且已加载扩展(见「首次安装」),点一下扩展图标唤醒后台,然后重试。
-   - **`3` 需登录** → 让用户在 Chrome 里登录飞书,然后重试。
-   - **`4` 需授权域名** → 私有化部署域名需用户手势授权:让用户打开该域名下任意飞书页面 →
-     点扩展图标开侧边栏 → 点「授权该域名」,然后重试。
-   - **`0`** → 把 stdout 里列出的写入文件告诉用户(路径形如 `<文档名>/<文档名>.md`)。
-3. 成功后产物在 `<输出目录>/<文档名>/` 子文件夹里(`md` 含 `images/` 子目录用相对路径引用),每篇文档独立成夹。
+2. 非 0 退出 → 解析 stderr 最后一行 JSON,按 `hint` 执行,不要自行猜测:
+   - `retryable: true` → 按 hint 做完(如点扩展图标唤醒)直接重跑同一条命令,同样的错误连续出现 2 次就停下问用户。
+   - `retryable: false` → hint 里需要用户操作的(登录/授权域名),把 hint 转述给用户,等用户确认完成后重跑。
+3. 退出码 0 → 把 stdout 里列出的写入文件告诉用户(路径形如 `<文档名>/<文档名>.md`)。
+   产物在 `<输出目录>/<文档名>/` 子文件夹里(`md` 含 `images/` 子目录用相对路径引用),每篇文档独立成夹。
+
+### 完整工作流示例(未登录 → 自愈 → 成功)
+
+```
+第 1 步  node .../fetch.mjs https://xxx.feishu.cn/docx/AbCd... ./notes
+        → 退出码 3,JSON: {"subtype":"need_login","hint":"让用户在 Chrome 中打开该文档域名并登录飞书…"}
+第 2 步  对用户说:「需要先在 Chrome 里登录 xxx.feishu.cn 的飞书,登录好了告诉我。」
+第 3 步  用户确认后,原样重跑第 1 步命令
+        → 退出码 0,stdout 列出写入文件 → 告诉用户产物路径,结束。
+```
 
 ## 首次安装(仅一次,只需加载扩展,无系统级安装)
 
@@ -68,8 +130,9 @@ node ~/.claude/skills/larksnap-fetch/scripts/fetch.mjs <飞书链接> <输出目
 
 ## 排查
 
-- `~/.larksnap/daemon.log` 看 daemon 是否在 listen、扩展是否连上、任务是否派发。
+- `~/.larksnap/daemon.log` 看 daemon 是否在 listen、扩展是否连上、任务是否派发;`~/.larksnap/daemon.pid` 是在监听实例的 PID。
 - 连不上:确认 Chrome 开着、扩展已加载;扩展后台休眠时第一条命令可能要等它经 `/ping` 重连(alarms ~24s),点一下扩展图标可立即唤醒。
 - 端口冲突:daemon 默认 `127.0.0.1:19925`,可用环境变量 `LARKSNAP_PORT` 改(需与扩展 `src/background/bridge.ts` 里的 `PORT` 一致)。
 - 图片缺失/某域名导出失败:多为未按「基础域通配」授权该域名(含图片 drive-stream 子域),在侧边栏重新授权。
-- 安全:daemon 只绑回环、校验 Origin(非 `chrome-extension://` 拒)+ 要求 `X-Larksnap` 头,挡掉网页发起的 CSRF;本机其他进程仍可连(loopback 固有风险,自用工具可接受)。
+- 版本漂移:fetch.mjs 发现在跑的 daemon 版本和本技能不一致时会**自动重启**到自己带的版本(装在多个项目的旧技能不会悄悄坏掉,但旧技能副本建议也更新);扩展和 daemon 的 WS 握手互报协议版本,不一致时 popup 会提示更新。
+- 安全:daemon 只绑回环、校验 Origin(非 `chrome-extension://` 拒)+ 要求 `X-Larksnap` 头,挡掉网页 CSRF;CLI→daemon 的请求另有 **HMAC-SHA256 签名**(key 在 `~/.larksnap/secret`,0600,首次自动生成;签名覆盖时间戳/method/path/body 摘要,60s 防重放,无回落),挡掉本机其他身份的冒充。扩展侧 WS 读不了 key 文件,维持 Origin 校验(已知局限)。

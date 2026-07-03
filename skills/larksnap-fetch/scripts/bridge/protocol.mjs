@@ -5,9 +5,11 @@
 //   扩展 ──WS 消息(进度/结果)──▶ daemon ──写入 /command 流──▶ CLI
 //   daemon 监听 127.0.0.1:PORT；扩展是 WS 客户端，主动连出。
 //
-// 安全（防浏览器 CSRF，照搬 OpenCLI 思路）：
+// 安全（防浏览器 CSRF + 防本机其他身份冒充，参考 OpenCLI/官方 sidecar 思路）：
 //   - Origin 校验：HTTP/WS 的 Origin 非 chrome-extension:// 一律拒（Node 不发 Origin → 放行）
-//   - 自定义头 X-Larksnap：网页无法在简单请求里带，预检又被拒
+//   - HMAC 签名：CLI→daemon 的写操作端点每个请求签名（key 存 ~/.larksnap/secret，0600），
+//     签名覆盖 版本/时间戳/method/path/body摘要，60s 防重放，验签失败无回落
+//   - 扩展侧 WS 无法读本地 key 文件，维持 Origin 校验（已知局限，配对方案留待需要时再做）
 //   - 只绑 127.0.0.1；body 上限
 import os from 'node:os';
 import path from 'node:path';
@@ -15,19 +17,68 @@ import fs from 'node:fs';
 import crypto from 'node:crypto';
 import { EventEmitter } from 'node:events';
 
-export const DAEMON_VERSION = '1.0.0';
+export const DAEMON_VERSION = '1.2.0'; // 1.1.0: 路由错误带 subtype；1.2.0: HMAC 签名 + 协议版本握手 + PID
+export const PROTOCOL_VERSION = 1; // WS 握手用：hello/welcome 双向携带，不匹配时提示更新
 export const HOST = '127.0.0.1';
 export const PORT = Number(process.env.LARKSNAP_PORT || 19925);
 export const PING_URL = `http://${HOST}:${PORT}/ping`;
 export const COMMAND_URL = `http://${HOST}:${PORT}/command`;
 export const WS_PATH = '/ext';
 export const AUTH_HEADER = 'x-larksnap';
+export const SIG_HEADER = 'x-larksnap-sig';
 
 export const HOME_DIR = path.join(os.homedir(), '.larksnap');
 export const LOG_PATH = path.join(HOME_DIR, 'daemon.log');
+export const SECRET_PATH = path.join(HOME_DIR, 'secret');
+export const PID_PATH = path.join(HOME_DIR, 'daemon.pid');
 
 export function ensureHomeDir() {
   fs.mkdirSync(HOME_DIR, { recursive: true });
+}
+
+// ==================== HMAC 签名（CLI ⇄ daemon）====================
+
+/** 读共享 key；不存在则生成（32 字节 hex，0600）。并发生成时输家重读赢家的。 */
+export function loadOrCreateSecret() {
+  ensureHomeDir();
+  try {
+    const s = fs.readFileSync(SECRET_PATH, 'utf8').trim();
+    if (s) return s;
+  } catch {
+    /* 不存在 → 下面生成 */
+  }
+  const fresh = crypto.randomBytes(32).toString('hex');
+  try {
+    fs.writeFileSync(SECRET_PATH, fresh + '\n', { mode: 0o600, flag: 'wx' });
+    return fresh;
+  } catch {
+    // 另一进程刚写入（EEXIST）→ 用它的
+    return fs.readFileSync(SECRET_PATH, 'utf8').trim();
+  }
+}
+
+function hmacHex(secret, ts, method, pathname, body) {
+  const bodyHash = crypto.createHash('sha256').update(body || '').digest('hex');
+  const toSign = `v1\n${ts}\n${method.toUpperCase()}\n${pathname}\n${bodyHash}`;
+  return crypto.createHmac('sha256', secret).update(toSign).digest('hex');
+}
+
+/** 生成签名头的值：`v1,t=<unix秒>,s=<hex>`。 */
+export function makeSigHeader(secret, method, pathname, body) {
+  const ts = Math.floor(Date.now() / 1000);
+  return `v1,t=${ts},s=${hmacHex(secret, ts, method, pathname, body)}`;
+}
+
+/** 校验签名头。时间戳漂移超过 skewSec 或签名不符 → false。 */
+export function verifySigHeader(secret, headerValue, method, pathname, body, skewSec = 60) {
+  const m = /^v1,t=(\d+),s=([0-9a-f]{64})$/.exec(String(headerValue || ''));
+  if (!m) return false;
+  const ts = Number(m[1]);
+  if (Math.abs(Math.floor(Date.now() / 1000) - ts) > skewSec) return false;
+  const expected = hmacHex(secret, ts, method, pathname, body);
+  const a = Buffer.from(m[2], 'hex');
+  const b = Buffer.from(expected, 'hex');
+  return a.length === b.length && crypto.timingSafeEqual(a, b);
 }
 
 // ==================== 手搓 WebSocket 服务端 ====================
