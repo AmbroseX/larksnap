@@ -44,6 +44,7 @@ function makeNode(
     else if (key.includes('strike')) node.strike = true;
     else if (key.includes('inline') && key.includes('code')) node.inlineCode = true;
     else if (key === 'code' || key.includes('codeinline')) node.inlineCode = true;
+    else if (key.includes('equation')) node.equation = val;
     else if (key.includes('link') || key.includes('href') || key.includes('url')) {
       node.link = decodeLinkValue(val);
     }
@@ -135,6 +136,8 @@ function mergeAdjacent(nodes: InlineNode[]): InlineNode[] {
       last &&
       !last.link &&
       !n.link &&
+      !last.equation &&
+      !n.equation &&
       last.bold === n.bold &&
       last.italic === n.italic &&
       last.strike === n.strike &&
@@ -154,6 +157,7 @@ export function renderInline(nodes: InlineNode[]): string {
     .map((n) => {
       let t = n.text;
       if (t === '\n') return '  \n'; // 软换行
+      if (n.equation) return `$${n.equation.trim()}$`;
       if (n.inlineCode) return '`' + t.replace(/`/g, '\\`') + '`';
       if (n.bold) t = `**${t}**`;
       if (n.italic) t = `*${t}*`;
@@ -164,7 +168,7 @@ export function renderInline(nodes: InlineNode[]): string {
     .join('');
 }
 
-/** 取 InlineNode[] 的纯文本（用于代码块/标题去样式场景） */
+/** 取 InlineNode[] 的纯文本（用于代码块/标题去样式场景）；公式取 LaTeX 源码 */
 export function plainText(nodes: InlineNode[]): string {
-  return nodes.map((n) => n.text).join('');
+  return nodes.map((n) => n.equation ?? n.text).join('');
 }

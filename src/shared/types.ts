@@ -146,6 +146,8 @@ export interface InlineNode {
   inlineCode?: boolean;
   /** 链接 URL（存在则为链接） */
   link?: string;
+  /** 行内公式的 LaTeX 源码（正文里只是占位符，渲染时用它替换） */
+  equation?: string;
 }
 
 /** client_vars block_map 归一后的块结构 */
