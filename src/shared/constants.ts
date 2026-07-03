@@ -87,10 +87,16 @@ export const FEISHU_TOKEN_RE = /^[A-Za-z0-9]{16,}$/;
 /** 飞书文档支持的域名后缀 */
 export const FEISHU_HOSTS = ['feishu.cn', 'feishu.net', 'larksuite.com'];
 
+/** 开源项目主页 */
+export const REPO_URL = 'https://github.com/AmbroseX/larksnap';
+
+/** 错误反馈（GitHub Issues） */
+export const ISSUES_URL = 'https://github.com/AmbroseX/larksnap/issues';
+
 /** 默认配置 */
 export const DEFAULT_CONFIG: ExtensionConfig = {
   imageMode: 'download',
-  feedbackUrl: 'https://github.com/AmbroseX/larksnap/issues/new',
+  feedbackUrl: `${ISSUES_URL}/new`,
   diagnosticIncludeSnapshot: true,
   trustedDomains: [],
   webcopy: {

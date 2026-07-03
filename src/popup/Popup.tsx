@@ -3,7 +3,7 @@
  * 仿 OpenCLI popup。点击图标弹出本窗口（manifest default_popup）；侧边栏从底部按钮打开。
  */
 import { useEffect, useState } from 'react';
-import { MSG } from '../shared/constants';
+import { ISSUES_URL, MSG, REPO_URL } from '../shared/constants';
 import { sendToBackground } from '../shared/messaging';
 
 interface BridgeStatus {
@@ -110,14 +110,15 @@ export function Popup() {
         <button type="button" className="panel-btn" onClick={openSidePanel}>
           打开侧边栏
         </button>
-        <a
-          className="doc-link"
-          href="https://github.com/AmbroseX/larksnap#readme"
-          target="_blank"
-          rel="noreferrer"
-        >
-          使用文档
-        </a>
+        <span className="links">
+          <a className="doc-link" href={REPO_URL} target="_blank" rel="noreferrer">
+            开源项目
+          </a>
+          <span className="link-sep">·</span>
+          <a className="doc-link" href={ISSUES_URL} target="_blank" rel="noreferrer">
+            反馈问题
+          </a>
+        </span>
       </footer>
     </div>
   );
