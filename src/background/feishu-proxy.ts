@@ -37,6 +37,17 @@ async function send<T>(tabId: number, message: unknown): Promise<T> {
   return res.data as T;
 }
 
+/**
+ * 解析导出目标 tab 的 id —— 桥接模式用后台开的标签页，UI 模式用活跃页。
+ * 与 activeContentTab 同源，但不注入 content.js（供 MAIN world executeScript 用）。
+ */
+export async function resolveTargetTabId(): Promise<number> {
+  if (_contentTabId != null) return _contentTabId;
+  const tab = await getActiveTab();
+  if (!tab?.id) throw new Error('无活跃标签页');
+  return tab.id;
+}
+
 /** 取当前活跃 tab 的 id，并确保 content 已注入 */
 async function activeContentTab(): Promise<number> {
   if (_contentTabId != null) {

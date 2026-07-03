@@ -5,6 +5,7 @@ import { detectActiveDoc } from './doc-detect';
 import { getSnapshot } from './feishu-proxy';
 import { reportProgress } from './progress';
 import { exportMarkdown } from './exporters/markdown';
+import { exportSheet } from './exporters/sheet';
 import { exportPdf } from './exporters/pdf';
 import { exportHtml } from './exporters/html';
 import { exportAttachments } from './exporters/attachments';
@@ -101,7 +102,11 @@ async function handleMessage(
     case MSG.EXPORT_MARKDOWN: {
       const doc = await detectActiveDoc();
       const err = requireReady(doc);
-      return err ?? exportMarkdown(doc!);
+      if (err) return err;
+      // 电子表格走专门的内存抽取导出（docx 那套 client_vars 对表格是空的）
+      return doc!.docType === 'sheets'
+        ? exportSheet(doc!)
+        : exportMarkdown(doc!);
     }
 
     case MSG.EXPORT_WORD: {
@@ -112,19 +117,19 @@ async function handleMessage(
     case MSG.EXPORT_PDF: {
       const doc = await detectActiveDoc();
       const err = requireReady(doc);
-      return err ?? exportPdf(doc!);
+      return err ?? blockSheetOnly(doc!) ?? exportPdf(doc!);
     }
 
     case MSG.EXPORT_HTML: {
       const doc = await detectActiveDoc();
       const err = requireReady(doc);
-      return err ?? exportHtml(doc!);
+      return err ?? blockSheetOnly(doc!) ?? exportHtml(doc!);
     }
 
     case MSG.EXPORT_ATTACHMENTS: {
       const doc = await detectActiveDoc();
       const err = requireReady(doc);
-      return err ?? exportAttachments(doc!);
+      return err ?? blockSheetOnly(doc!) ?? exportAttachments(doc!);
     }
 
     case MSG.CACHE_DOC: {
@@ -186,13 +191,38 @@ async function handleMessage(
   }
 }
 
-/** 校验文档是否就绪（已识别 + 已授权），否则返回错误 Response */
+/**
+ * 多维表格（base）走的又是另一套接口，现有任何管线都处理不了，全局挡掉。
+ * 电子表格（sheets）已由 exportSheet 支持导出 Markdown/CSV，故不在此列——
+ * 但 PDF/HTML/附件对表格仍不适用，由各自 handler 单独挡（见 blockSheetOnly）。
+ * 详见 docs/plans/2026-07-03-sheets导出适配研究.md
+ */
+const UNSUPPORTED_EXPORT_TYPES: Partial<Record<DocInfo['docType'], string>> = {
+  base: '多维表格',
+};
+
+/** 校验文档是否就绪（已识别 + 已授权 + 类型可导出），否则返回错误 Response */
 function requireReady(doc: DocInfo | null): Response | null {
   if (!doc || !doc.isFeishuDoc) {
     return { success: false, error: '无法识别当前页面，请在飞书文档页面操作' };
   }
   if (doc.needsAuth) {
     return { success: false, error: '检测到私有化飞书，请先在侧边栏授权访问该域名' };
+  }
+  const unsupported = UNSUPPORTED_EXPORT_TYPES[doc.docType];
+  if (unsupported) {
+    return { success: false, error: `暂不支持导出${unsupported}，当前仅支持文档（docx/wiki）与电子表格` };
+  }
+  return null;
+}
+
+/** 电子表格只支持 Markdown/CSV 导出；PDF/HTML/附件对表格不适用，单独挡 */
+function blockSheetOnly(doc: DocInfo): Response | null {
+  if (doc.docType === 'sheets') {
+    return {
+      success: false,
+      error: '电子表格暂只支持导出 Markdown（含 CSV），PDF / HTML / 附件不适用',
+    };
   }
   return null;
 }

@@ -16,6 +16,7 @@ import { setContentTab } from './feishu-proxy';
 import { setDownloadSink } from './download';
 import { setProgressSink } from './progress';
 import { exportMarkdown } from './exporters/markdown';
+import { exportSheet } from './exporters/sheet';
 import { exportPdf } from './exporters/pdf';
 import { exportHtml } from './exporters/html';
 
@@ -269,7 +270,10 @@ async function runJob(job: Job): Promise<void> {
 
     const fmt = (job.format || 'md').toLowerCase();
     let res: Response;
-    if (fmt === 'pdf') res = await exportPdf(doc);
+    if (doc.docType === 'sheets') {
+      // 电子表格：无论请求什么格式，都走内存抽取 → Markdown + CSV（打包 zip）
+      res = await exportSheet(doc);
+    } else if (fmt === 'pdf') res = await exportPdf(doc);
     else if (fmt === 'html') res = await exportHtml(doc);
     else res = await exportMarkdown(doc);
 
