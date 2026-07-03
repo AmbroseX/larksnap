@@ -168,11 +168,88 @@ function renderCallout(block: Block, depth: number, ctx: Ctx): string {
 }
 
 /**
- * 表格渲染：client_vars 表格结构在公私两端待进一步抓样确认，这里做降级——
- * 尽力保留单元格文本，避免内容丢失；合并单元格不还原（占位说明）。
+ * 表格渲染（2026-07 抓样确认的 client_vars 结构）：
+ * - data.rows_id / data.columns_id 定行列顺序；
+ * - data.cell_set 以 `行id+列id` 为键 → { block_id, merge_info: { row_span, col_span } }；
+ * - 被合并覆盖的格子在 cell_set 里仍有自己的（空）单元格块；
+ * - 单元格内容是 table_cell 块的子块，靠 fetchClientVars 补拉 skip_blocks 才在 map 里。
+ * 统一输出 GFM 管道表格；合并单元格把起点内容复制到每个被覆盖的格子
+ * （与飞书官方 md 导出行为一致），保证任何查看器下表格都不缺格。
+ * 结构缺失时退回顺序文本，保内容不保形（宪法原则 III）。
  */
 function renderTable(block: Block, depth: number, ctx: Ctx): string {
-  const children = renderChildren(block, depth, ctx);
-  const note = '<!-- 表格：合并单元格等复杂结构已降级为顺序文本 -->';
-  return children.trim() ? `${note}\n\n${children}` : note;
+  const t = (block.extra.table ?? {}) as Record<string, unknown>;
+  const rowIds = Array.isArray(t.rows_id) ? (t.rows_id as unknown[]).map(String) : [];
+  const colIds = Array.isArray(t.columns_id) ? (t.columns_id as unknown[]).map(String) : [];
+  const cellSet = (t.cell_set ?? {}) as Record<
+    string,
+    { block_id?: string; merge_info?: { row_span?: number; col_span?: number } }
+  >;
+
+  if (!rowIds.length || !colIds.length) {
+    // 结构对不上（旧版本/私有化差异）：退回顺序文本
+    const children = renderChildren(block, depth, ctx);
+    const note = '<!-- 表格：结构无法识别，已降级为顺序文本 -->';
+    return children.trim() ? `${note}\n\n${children}` : note;
+  }
+
+  const rows = rowIds.length;
+  const cols = colIds.length;
+  // grid[r][c] = 该格最终文本；被合并覆盖的格子复制起点格内容
+  const grid: (string | undefined)[][] = Array.from({ length: rows }, () =>
+    new Array<string | undefined>(cols).fill(undefined)
+  );
+
+  for (let r = 0; r < rows; r++) {
+    for (let c = 0; c < cols; c++) {
+      const entry = cellSet[rowIds[r] + colIds[c]];
+      const cellId = String(entry?.block_id ?? '');
+      if (grid[r][c] !== undefined) {
+        // 被合并覆盖：内容已从起点格复制过来，这里只把空 cell 块标记为已消费
+        if (cellId) markSubtreeSeen(cellId, ctx);
+        continue;
+      }
+      const text = renderCellContent(cellId, depth, ctx);
+      const rowSpan = Math.max(1, Number(entry?.merge_info?.row_span) || 1);
+      const colSpan = Math.max(1, Number(entry?.merge_info?.col_span) || 1);
+      for (let dr = 0; dr < rowSpan && r + dr < rows; dr++) {
+        for (let dc = 0; dc < colSpan && c + dc < cols; dc++) {
+          grid[r + dr][c + dc] = text;
+        }
+      }
+    }
+  }
+
+  return renderPipeTable(grid);
+}
+
+/** 单元格正文：子块 Markdown 合成一行（换行转 <br>） */
+function renderCellContent(cellId: string, depth: number, ctx: Ctx): string {
+  const cell = ctx.tree.map[cellId];
+  if (!cell) return '';
+  ctx.seen.add(cellId);
+  return renderChildren(cell, depth, ctx).replace(/\n+/g, '<br>').trim();
+}
+
+/** 把整棵子树标记为已渲染，防止后续被当孤儿块重复输出 */
+function markSubtreeSeen(id: string, ctx: Ctx): void {
+  if (ctx.seen.has(id)) return;
+  ctx.seen.add(id);
+  const block = ctx.tree.map[id];
+  if (block) for (const cid of block.children) markSubtreeSeen(cid, ctx);
+}
+
+function renderPipeTable(grid: (string | undefined)[][]): string {
+  const lines: string[] = [];
+  for (let r = 0; r < grid.length; r++) {
+    const cells = grid[r].map((text) => escapePipeCell(text ?? ''));
+    lines.push(`| ${cells.join(' | ')} |`);
+    // GFM 必须有表头分隔行；飞书首行即表头（header_row 缺省也按此处理）
+    if (r === 0) lines.push(`| ${grid[r].map(() => '---').join(' | ')} |`);
+  }
+  return lines.join('\n');
+}
+
+function escapePipeCell(text: string): string {
+  return text.replace(/\|/g, '\\|');
 }

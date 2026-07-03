@@ -82,6 +82,8 @@ export async function fetchMeta(token: string): Promise<Json> {
 
 /**
  * 拉取完整 client_vars 块内容（含 mode=4 翻页直到 has_more=false）。
+ * 首屏会把表格等大块的子树列进 skip_blocks 跳过不发，需要再按块补拉，
+ * 否则表格单元格（table_cell）永远不在 block_map 里。
  * 返回合并后的 { block_map, block_sequence, meta_map, ...原始首屏字段 }。
  */
 export async function fetchClientVars(doc: ResolvedDoc): Promise<Json> {
@@ -94,8 +96,11 @@ export async function fetchClientVars(doc: ResolvedDoc): Promise<Json> {
 
   const data = (first.data ?? {}) as Record<string, unknown>;
   const blockMap = (data.block_map ?? {}) as Record<string, unknown>;
+  const skipped = new Set<string>(
+    Array.isArray(data.skip_blocks) ? (data.skip_blocks as string[]) : []
+  );
 
-  // 翻页：mode=4 + cursor，合并附加块（表格单元格等）
+  // 翻页：mode=4 + cursor，合并附加块
   let cursor = (data.cursor as string) ?? '';
   let hasMore = Boolean(data.has_more);
   let guard = 0;
@@ -108,9 +113,39 @@ export async function fetchClientVars(doc: ResolvedDoc): Promise<Json> {
     )) as Json;
     const pd = (page.data ?? {}) as Record<string, unknown>;
     Object.assign(blockMap, (pd.block_map ?? {}) as Record<string, unknown>);
+    for (const s of (pd.skip_blocks as string[]) ?? []) skipped.add(String(s));
     hasMore = Boolean(pd.has_more);
     cursor = (pd.cursor as string) ?? '';
     if (!cursor) break;
+  }
+
+  // 补拉被跳过的子树：mode=4 + block_id（表格单元格及其正文块从这里来）
+  const pending = [...skipped];
+  const done = new Set<string>();
+  while (pending.length && done.size < 50) {
+    const bid = pending.shift()!;
+    if (done.has(bid)) continue;
+    done.add(bid);
+    let subCursor = '';
+    let subMore = true;
+    let subGuard = 0;
+    while (subMore && subGuard < 50) {
+      subGuard++;
+      const page = (await feishuGet(
+        `/space/api/docx/pages/client_vars?id=${doc.objToken}&mode=4&block_id=${bid}&cursor=${encodeURIComponent(
+          subCursor
+        )}&limit=239${wikiPart}`
+      )) as Json;
+      const pd = (page.data ?? {}) as Record<string, unknown>;
+      Object.assign(blockMap, (pd.block_map ?? {}) as Record<string, unknown>);
+      // 子树里可能还有下一层被跳过的块，入队继续补
+      for (const s of (pd.skip_blocks as string[]) ?? []) {
+        if (!done.has(String(s))) pending.push(String(s));
+      }
+      subMore = Boolean(pd.has_more);
+      subCursor = (pd.cursor as string) ?? '';
+      if (!subCursor) break;
+    }
   }
 
   data.block_map = blockMap;
