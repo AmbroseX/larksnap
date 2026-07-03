@@ -3,6 +3,7 @@ dist/
 release/
 .tmp/
 *.log
+*.zip
 .DS_Store
 extension.pem
 
