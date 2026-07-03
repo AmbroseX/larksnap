@@ -7,7 +7,7 @@
 //
 // 安全（防浏览器 CSRF，照搬 OpenCLI 思路）：
 //   - Origin 校验：HTTP/WS 的 Origin 非 chrome-extension:// 一律拒（Node 不发 Origin → 放行）
-//   - 自定义头 X-Feishu2md：网页无法在简单请求里带，预检又被拒
+//   - 自定义头 X-Larksnap：网页无法在简单请求里带，预检又被拒
 //   - 只绑 127.0.0.1；body 上限
 import os from 'node:os';
 import path from 'node:path';
@@ -17,13 +17,13 @@ import { EventEmitter } from 'node:events';
 
 export const DAEMON_VERSION = '1.0.0';
 export const HOST = '127.0.0.1';
-export const PORT = Number(process.env.FEISHU2MD_PORT || 19925);
+export const PORT = Number(process.env.LARKSNAP_PORT || 19925);
 export const PING_URL = `http://${HOST}:${PORT}/ping`;
 export const COMMAND_URL = `http://${HOST}:${PORT}/command`;
 export const WS_PATH = '/ext';
-export const AUTH_HEADER = 'x-feishu2md';
+export const AUTH_HEADER = 'x-larksnap';
 
-export const HOME_DIR = path.join(os.homedir(), '.feishu2md');
+export const HOME_DIR = path.join(os.homedir(), '.larksnap');
 export const LOG_PATH = path.join(HOME_DIR, 'daemon.log');
 
 export function ensureHomeDir() {

@@ -7,7 +7,7 @@
 // 收到 daemon push 的 { type:'job', id, url, format } → 后台开标签页跑导出引擎，
 // 用 download sink 截获产物（zip/md 的 data URL）经 WS 回传；登录/授权缺失回 need-*。
 //
-// 端口/路径需与 skills/feishu-doc-fetch/scripts/bridge/protocol.mjs 保持一致。
+// 端口/路径需与 skills/larksnap-fetch/scripts/bridge/protocol.mjs 保持一致。
 import type { DocInfo, ExportProgress, Response } from '../shared/types';
 import { CONTENT_MSG } from '../shared/constants';
 import { detectDocFromUrl, stripSiteSuffix } from '../content/feishu-detect';
@@ -22,7 +22,7 @@ import { exportHtml } from './exporters/html';
 const PORT = 19925;
 const PING_URL = `http://127.0.0.1:${PORT}/ping`;
 const WS_URL = `ws://127.0.0.1:${PORT}/ext`;
-const KEEPALIVE_ALARM = 'feishu2md-bridge-keepalive';
+const KEEPALIVE_ALARM = 'larksnap-bridge-keepalive';
 const RECONNECT_BASE = 2000;
 const RECONNECT_MAX = 5000;
 
@@ -33,7 +33,7 @@ let connecting = false;
 let daemonVersion: string | null = null;
 let contextId: string | null = null;
 
-const CONTEXT_ID_KEY = 'feishu2md:bridge:context-id';
+const CONTEXT_ID_KEY = 'larksnap:bridge:context-id';
 
 /** 取/生成本安装的 profile code（持久化在 chrome.storage.local）。 */
 async function getContextId(): Promise<string> {
@@ -128,7 +128,7 @@ async function connect(): Promise<void> {
           contextId: cid,
         })
       );
-      console.log('[feishu2md] 桥接已连接 daemon');
+      console.log('[larksnap] 桥接已连接 daemon');
     };
     sock.onmessage = (ev) => {
       if (ws !== sock) return;

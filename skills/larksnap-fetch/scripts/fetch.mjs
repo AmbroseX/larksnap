@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// feishu-doc-fetch CLI —— 在 CC 里把一个飞书文档链接抓到本地目录。
+// larksnap-fetch CLI —— 在 CC 里把一个飞书文档链接抓到本地目录。
 //
 // 自包含的全局技能：daemon/protocol 随技能一起分发（见 ./bridge/），
 // 不依赖任何特定仓库的目录结构，因此可从任意项目调用。
@@ -21,8 +21,8 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DAEMON_PATH = path.resolve(__dirname, 'bridge/daemon.mjs');
 
 const HOST = '127.0.0.1';
-const PORT = Number(process.env.FEISHU2MD_PORT || 19925);
-const AUTH_HEADER = 'x-feishu2md';
+const PORT = Number(process.env.LARKSNAP_PORT || 19925);
+const AUTH_HEADER = 'x-larksnap';
 
 const argv = process.argv.slice(2);
 function flag(name, def = null) {

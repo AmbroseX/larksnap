@@ -81,4 +81,4 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
 });
 
 // 标记已注入，避免重复执行副作用
-(window as unknown as { __feishu2md__?: boolean }).__feishu2md__ = true;
+(window as unknown as { __larksnap__?: boolean }).__larksnap__ = true;

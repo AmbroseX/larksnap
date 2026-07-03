@@ -84,7 +84,7 @@ export async function exportDiagnostic(doc: DocInfo | null): Promise<Response> {
   try {
     await chrome.downloads.download({
       url: dataUrl,
-      filename: `feishu2md-diagnostic-${Date.now()}.json`,
+      filename: `larksnap-diagnostic-${Date.now()}.json`,
       saveAs: true,
     });
     await reportProgress('diagnostic', 'success', '诊断信息已导出', 100);

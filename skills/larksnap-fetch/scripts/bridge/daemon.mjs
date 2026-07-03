@@ -45,7 +45,7 @@ function resolveConn(contextId) {
     };
   }
   if (extConns.size === 0) {
-    return { error: '扩展未连接：请确认 Chrome 已打开并加载 feishu2md 扩展，点一下图标唤醒后台后重试。' };
+    return { error: '扩展未连接：请确认 Chrome 已打开并加载 larksnap 扩展，点一下图标唤醒后台后重试。' };
   }
   if (extConns.size === 1) return { conn: [...extConns.values()][0] };
   return {

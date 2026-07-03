@@ -1,4 +1,4 @@
-# larksnap · 飞书文档导出助手
+# LarkSnap · 飞书文档导出助手
 
 **简体中文** | [English](README.en.md)
 
@@ -35,7 +35,7 @@
 - **选中文字自动复制**：开启后选中即进剪贴板（纯文本或 Markdown 可选，设置页可调最小字数），会话级不常驻。
 - **复制标签页链接**：一键复制当前页或全部标签页，支持 Markdown 链接 / 标题+URL / 仅标题 / 仅 URL 四种格式。
 - **导出诊断**：一键导出脱敏的诊断包（DocInfo / 接口响应样本 / 选路结论 / 版本），用于定位私有化与公有云的字段差异 —— 已显式剔除 `editor_map` / `user_map` / `creator_id` 等 PII 字段。
-- **CC 桥接（可选）**：通过本地 daemon 把 Claude Code 等命令行工具接到这个已登录的扩展上，无人值守地跑导出（详见 [CC 桥接技能](#cc-桥接技能feishu-doc-fetch)）。
+- **CC 桥接（可选）**：通过本地 daemon 把 Claude Code 等命令行工具接到这个已登录的扩展上，无人值守地跑导出（详见 [CC 桥接技能](#cc-桥接技能larksnap-fetch)）。
 
 ## 工作原理
 
@@ -61,7 +61,7 @@
 3. **不支持的块降级占位但尽量保留后代文本**，避免内容丢失。
 4. **内容不外发、无后端**，全流程纯客户端。
 
-> 路线设计与取舍的完整论证见 [`docs/技术方案.md`](docs/技术方案.md)，需求规格见 [`specs/`](specs/)。
+> 需求规格见 [`specs/`](specs/)。
 
 ## 安装（从源码加载）
 
@@ -113,9 +113,9 @@ npm run build          # 生产构建 → dist/
 
 权限说明：右键菜单靠 `activeTab` 手势授权，**不需要预授权任何域名**；侧边栏路径若注入失败，会在同一次点击里弹出该域名的授权请求，拒绝的话改用右键菜单即可。
 
-## CC 桥接技能（feishu-doc-fetch）
+## CC 桥接技能（larksnap-fetch）
 
-`skills/feishu-doc-fetch/` 是一个**自包含的 Claude Code 技能**：在 CC 里贴一个飞书链接即可导出到本地目录。它内置一个零依赖的本地撮合 daemon，让命令行把链接交给**已登录的扩展**去导出，从而无需在 CLI 侧重新处理登录态。
+`skills/larksnap-fetch/` 是一个**自包含的 Claude Code 技能**：在 CC 里贴一个飞书链接即可导出到本地目录。它内置一个零依赖的本地撮合 daemon，让命令行把链接交给**已登录的扩展**去导出，从而无需在 CLI 侧重新处理登录态。
 
 ```
   CLI  ──HTTP POST /command (流式 NDJSON)──▶  daemon (127.0.0.1:19925)  ──WS push──▶  扩展
@@ -126,14 +126,14 @@ npm run build          # 生产构建 → dist/
 - daemon 只绑 `127.0.0.1`，并通过 Origin 校验 + 自定义请求头防御浏览器侧 CSRF。
 - 收到导出任务后，扩展在后台新开标签页跑导出引擎，用 download sink 截获产物经 WS 回传；缺登录 / 缺授权时回 `need-*`。
 
-协议常量见 [`skills/feishu-doc-fetch/scripts/bridge/protocol.mjs`](skills/feishu-doc-fetch/scripts/bridge/protocol.mjs)，daemon 实现见 [`skills/feishu-doc-fetch/scripts/bridge/daemon.mjs`](skills/feishu-doc-fetch/scripts/bridge/daemon.mjs)。
+协议常量见 [`skills/larksnap-fetch/scripts/bridge/protocol.mjs`](skills/larksnap-fetch/scripts/bridge/protocol.mjs)，daemon 实现见 [`skills/larksnap-fetch/scripts/bridge/daemon.mjs`](skills/larksnap-fetch/scripts/bridge/daemon.mjs)。
 
 ### 安装技能（一行命令）
 
 技能通过 [`npx skills`](https://github.com/vercel-labs/skills) 从本仓库直接安装到全局，任何项目里都能用：
 
 ```bash
-npx skills add AmbroseX/larksnap --skill feishu-doc-fetch -g -a claude-code
+npx skills add AmbroseX/larksnap --skill larksnap-fetch -g -a claude-code
 ```
 
 > ⚠️ 这行只装**技能文件**。技能要真正跑起来还需两个前提，缺一不可：
@@ -141,7 +141,7 @@ npx skills add AmbroseX/larksnap --skill feishu-doc-fetch -g -a claude-code
 > 2. 本仓库的**扩展已构建并加载进 Chrome**（登录态与导出引擎在扩展里，无法打包进技能）：
 >    在仓库根 `npm run build` → `chrome://extensions` 开发者模式 →「加载已解压的扩展程序」选 `dist/` → 点一下扩展图标唤醒后台。
 >
-> 装好后，在 CC 里直接贴飞书链接说「下载到某目录」即可；用法与退出码见 [`skills/feishu-doc-fetch/SKILL.md`](skills/feishu-doc-fetch/SKILL.md)。
+> 装好后，在 CC 里直接贴飞书链接说「下载到某目录」即可；用法与退出码见 [`skills/larksnap-fetch/SKILL.md`](skills/larksnap-fetch/SKILL.md)。
 
 ### 用法示例
 
@@ -162,7 +162,7 @@ docs/
 也可以绕开 CC 直接命令行调用：
 
 ```bash
-node ~/.claude/skills/feishu-doc-fetch/scripts/fetch.mjs \
+node ~/.claude/skills/larksnap-fetch/scripts/fetch.mjs \
   "https://your-company.feishu.cn/docx/xxxxxxxx" ./docs --format md
 ```
 
@@ -176,7 +176,7 @@ sidepanel.html         # 侧边栏入口（主 UI）
 options.html           # 设置页
 popup.html             # 后备弹窗入口
 skills/                # 可 `npx skills add` 安装的 Claude Code 技能
-  feishu-doc-fetch/    #   飞书链接 → 本地目录（自包含，内置桥接 daemon）
+  larksnap-fetch/    #   飞书链接 → 本地目录（自包含，内置桥接 daemon）
 docs/                  # 技术方案、PRD
 specs/                 # 功能规格（spec-driven）
 src/

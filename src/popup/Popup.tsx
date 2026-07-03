@@ -68,7 +68,7 @@ export function Popup() {
       await chrome.sidePanel.open({ windowId: win.id });
       window.close();
     } catch (e) {
-      console.warn('[feishu2md] 打开侧边栏失败:', e);
+      console.warn('[larksnap] 打开侧边栏失败:', e);
     }
   };
 

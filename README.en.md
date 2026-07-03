@@ -1,4 +1,4 @@
-# larksnap · Feishu / Lark Document Exporter
+# LarkSnap · Feishu / Lark Document Exporter
 
 [简体中文](README.md) | **English**
 
@@ -35,7 +35,7 @@ It was originally built for LLM-corpus / knowledge-base migration — turning do
 - **Auto-copy on selection**: once enabled, selected text goes straight to the clipboard (plain text or Markdown, minimum length configurable in settings); session-scoped, never persistent.
 - **Copy tab links**: copy the current tab or all tabs in one click, as Markdown links / title+URL / title only / URL only.
 - **Export diagnostics**: one-click export of a redacted diagnostic bundle (DocInfo / API response samples / routing decision / version) to pin down field differences between private and public deployments — PII fields like `editor_map` / `user_map` / `creator_id` are explicitly stripped.
-- **CC bridge (optional)**: connect command-line tools like Claude Code to this logged-in extension via a local daemon and run exports unattended (see [CC bridge skill](#cc-bridge-skill-feishu-doc-fetch)).
+- **CC bridge (optional)**: connect command-line tools like Claude Code to this logged-in extension via a local daemon and run exports unattended (see [CC bridge skill](#cc-bridge-skill-larksnap-fetch)).
 
 ## How it works
 
@@ -61,7 +61,7 @@ A few deliberate design principles:
 3. **Unsupported blocks degrade to a placeholder** while preserving descendant text where possible, so content isn't lost.
 4. **Nothing leaves your machine, no backend** — the whole flow is client-side.
 
-> Full rationale and trade-offs in [`docs/技术方案.md`](docs/技术方案.md); requirement specs in [`specs/`](specs/).
+> requirement specs in [`specs/`](specs/).
 
 ## Install (load from source)
 
@@ -111,9 +111,9 @@ On a **non-Feishu page** the side panel automatically switches to the "Web copy"
 
 Permissions: the context menu relies on the `activeTab` gesture — **no domain needs to be pre-authorized**; if the side-panel path fails to inject, it prompts for that domain's permission within the same click, and you can always fall back to the context menu.
 
-## CC bridge skill (feishu-doc-fetch)
+## CC bridge skill (larksnap-fetch)
 
-`skills/feishu-doc-fetch/` is a **self-contained Claude Code skill**: paste a Feishu link in CC and it exports to a local directory. It bundles a zero-dependency local matchmaking daemon that hands the link to the **logged-in extension** to export, so the CLI side never has to deal with login state.
+`skills/larksnap-fetch/` is a **self-contained Claude Code skill**: paste a Feishu link in CC and it exports to a local directory. It bundles a zero-dependency local matchmaking daemon that hands the link to the **logged-in extension** to export, so the CLI side never has to deal with login state.
 
 ```
   CLI  ──HTTP POST /command (streaming NDJSON)──▶  daemon (127.0.0.1:19925)  ──WS push──▶  extension
@@ -124,14 +124,14 @@ Permissions: the context menu relies on the `activeTab` gesture — **no domain 
 - The daemon binds `127.0.0.1` only, and defends against browser-side CSRF via Origin checks + a custom request header.
 - On receiving a job, the extension opens a background tab, runs the export engine, captures the artifact via a download sink, and streams it back over WS; missing login / permission returns `need-*`.
 
-Protocol constants: [`skills/feishu-doc-fetch/scripts/bridge/protocol.mjs`](skills/feishu-doc-fetch/scripts/bridge/protocol.mjs); daemon: [`skills/feishu-doc-fetch/scripts/bridge/daemon.mjs`](skills/feishu-doc-fetch/scripts/bridge/daemon.mjs).
+Protocol constants: [`skills/larksnap-fetch/scripts/bridge/protocol.mjs`](skills/larksnap-fetch/scripts/bridge/protocol.mjs); daemon: [`skills/larksnap-fetch/scripts/bridge/daemon.mjs`](skills/larksnap-fetch/scripts/bridge/daemon.mjs).
 
 ### Install the skill (one line)
 
 The skill installs globally straight from this repo via [`npx skills`](https://github.com/vercel-labs/skills), usable from any project:
 
 ```bash
-npx skills add AmbroseX/larksnap --skill feishu-doc-fetch -g -a claude-code
+npx skills add AmbroseX/larksnap --skill larksnap-fetch -g -a claude-code
 ```
 
 > ⚠️ This installs the **skill files only**. To actually run, two prerequisites are required:
@@ -139,7 +139,7 @@ npx skills add AmbroseX/larksnap --skill feishu-doc-fetch -g -a claude-code
 > 2. This repo's **extension built and loaded into Chrome** (login state and the export engine live in the extension and can't be bundled into the skill):
 >    run `npm run build` in the repo root → `chrome://extensions` Developer mode → "Load unpacked" → select `dist/` → click the extension icon to wake the background.
 >
-> Once set up, just paste a Feishu link in CC and say "download it to some directory." Usage and exit codes: [`skills/feishu-doc-fetch/SKILL.md`](skills/feishu-doc-fetch/SKILL.md).
+> Once set up, just paste a Feishu link in CC and say "download it to some directory." Usage and exit codes: [`skills/larksnap-fetch/SKILL.md`](skills/larksnap-fetch/SKILL.md).
 
 ### Usage example
 
@@ -160,7 +160,7 @@ docs/
 Or call it directly from the command line, bypassing CC:
 
 ```bash
-node ~/.claude/skills/feishu-doc-fetch/scripts/fetch.mjs \
+node ~/.claude/skills/larksnap-fetch/scripts/fetch.mjs \
   "https://your-company.feishu.cn/docx/xxxxxxxx" ./docs --format md
 ```
 
@@ -174,7 +174,7 @@ sidepanel.html         # side panel entry (main UI)
 options.html           # settings page
 popup.html             # fallback popup entry
 skills/                # Claude Code skills installable via `npx skills add`
-  feishu-doc-fetch/    #   Feishu link → local directory (self-contained, bundled bridge daemon)
+  larksnap-fetch/    #   Feishu link → local directory (self-contained, bundled bridge daemon)
 docs/                  # design docs, PRD
 specs/                 # feature specs (spec-driven)
 src/

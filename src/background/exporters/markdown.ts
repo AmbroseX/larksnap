@@ -160,7 +160,7 @@ async function runDecodeMd(
           finalMd = replaceAll(finalMd, `feishu-asset://${img.token}`, path);
         } else {
           // 单图失败：降级为在线 URL，不拖垮整篇（宪法原则 III）
-          console.warn('[feishu2md] 图片下载失败，降级为在线链接:', img.token);
+          console.warn('[larksnap] 图片下载失败，降级为在线链接:', img.token);
           finalMd = replaceAll(
             finalMd,
             `feishu-asset://${img.token}`,

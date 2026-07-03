@@ -5,14 +5,14 @@ export const EXTENSION_VERSION = '0.1.0';
 
 /** chrome.storage.local 的键名 */
 export const STORAGE_KEYS = {
-  CONFIG: 'feishu2md:config',
-  RUNTIME_STATE: 'feishu2md:runtime',
+  CONFIG: 'larksnap:config',
+  RUNTIME_STATE: 'larksnap:runtime',
   /** 缓存文档索引 */
-  CACHE_INDEX: 'feishu2md:cache:index',
+  CACHE_INDEX: 'larksnap:cache:index',
   /** 单篇缓存内容前缀，完整键为 `${CACHE_DOC_PREFIX}${token}` */
-  CACHE_DOC_PREFIX: 'feishu2md:cache:doc:',
+  CACHE_DOC_PREFIX: 'larksnap:cache:doc:',
   /** Markdown 导出能力缓存（按 host）：Record<host, MarkdownCapability> */
-  MD_CAP: 'feishu2md:md-capability',
+  MD_CAP: 'larksnap:md-capability',
 } as const;
 
 /** UI ↔ 背景 的消息类型 */
@@ -90,7 +90,7 @@ export const FEISHU_HOSTS = ['feishu.cn', 'feishu.net', 'larksuite.com'];
 /** 默认配置 */
 export const DEFAULT_CONFIG: ExtensionConfig = {
   imageMode: 'download',
-  feedbackUrl: 'https://github.com/your-org/feishu2md-extension/issues/new',
+  feedbackUrl: 'https://github.com/AmbroseX/larksnap/issues/new',
   diagnosticIncludeSnapshot: true,
   trustedDomains: [],
   webcopy: {

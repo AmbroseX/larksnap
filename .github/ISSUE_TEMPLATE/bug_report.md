@@ -15,13 +15,13 @@ labels: bug
 
 ## 环境
 - 扩展版本(popup 里可见):
-- daemon 版本 / 是否用桥接技能(feishu-doc-fetch):
+- daemon 版本 / 是否用桥接技能(larksnap-fetch):
 - 文档类型:公有云(feishu.cn / larksuite.com) / 私有化自建域名
 - 导出格式:md / pdf / html
 - 命令行退出码(若走技能):
 
 ## 日志 / 报错
-<!-- 若走桥接:~/.feishu2md/daemon.log 的相关片段;扩展 Service Worker 控制台报错。
+<!-- 若走桥接:~/.larksnap/daemon.log 的相关片段;扩展 Service Worker 控制台报错。
      ⚠️ 请先脱敏:去掉真实域名、token、文档标题、客户信息。 -->
 
 ```

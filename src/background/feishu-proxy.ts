@@ -82,7 +82,7 @@ export async function downloadMedia(urls: string[]): Promise<MediaBlob> {
   try {
     return await downloadMediaInSW(urls);
   } catch (err) {
-    console.warn('[feishu2md] SW 媒体下载失败，回退 content:', err);
+    console.warn('[larksnap] SW 媒体下载失败，回退 content:', err);
     const tabId = await activeContentTab();
     return send<MediaBlob>(tabId, {
       type: CONTENT_MSG.DOWNLOAD_MEDIA,

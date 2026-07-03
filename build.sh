@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# 飞书文档导出助手 - 扩展打包脚本
+# LarkSnap · 飞书文档导出助手 - 扩展打包脚本
 # 用法:
 #   ./build.sh          # 构建 → dist/ 目录（可直接加载未打包扩展；默认不混淆）
 #   ./build.sh --zip    # 构建 + 打包成 .zip（用于 Chrome Web Store 上传）

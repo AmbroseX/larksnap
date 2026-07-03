@@ -24,7 +24,7 @@ import {
 } from './webcopy';
 import type { TabCopyFormat } from '../shared/types';
 
-console.log('[feishu2md] Service Worker 启动');
+console.log('[larksnap] Service Worker 启动');
 
 // CC ⇄ 扩展 桥接：连原生宿主、长连保活、接收远程导出任务
 startBridge();

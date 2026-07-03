@@ -1,6 +1,6 @@
 # 飞书文档导出助手 宪法
 
-> 适用范围:`feishu2md-extension`(Chrome MV3 浏览器扩展)整个生命周期。
+> 适用范围:`larksnap-extension`(Chrome MV3 浏览器扩展)整个生命周期。
 > 本宪法是 `/speckit-specify`、`/speckit-plan`、`/speckit-tasks`、`/speckit-implement` 的评判依据,任何规格、计划、任务、实现与之冲突时**以宪法为准**。
 >
 > Version: 1.0.0 · Ratified: 2026-06-26 · Last Amended: 2026-06-26

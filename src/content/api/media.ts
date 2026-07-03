@@ -45,6 +45,6 @@ export async function downloadMediaByUrls(urls: string[]): Promise<MediaBlob> {
       }
     }
   }
-  console.warn('[feishu2md] content 媒体下载失败:', lastErr);
+  console.warn('[larksnap] content 媒体下载失败:', lastErr);
   throw lastErr instanceof Error ? lastErr : new Error(String(lastErr));
 }
