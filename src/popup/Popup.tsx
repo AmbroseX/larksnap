@@ -101,7 +101,7 @@ export function Popup() {
 
         {phase !== 'connected' && (
           <div className="hint">
-            在 CC 里运行 <code>feishu-fetch</code> 命令会自动拉起 daemon；扩展随后自动连上。点一下图标可立即唤醒后台。
+            在 CC 里运行 <code>/larksnap-fetch</code> 命令会自动拉起 daemon；扩展随后自动连上。点一下图标可立即唤醒后台。
           </div>
         )}
       </div>
