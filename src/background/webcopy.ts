@@ -8,6 +8,12 @@ import type {
 import { CONTENT_MSG } from '../shared/constants';
 import { getActiveTab } from './doc-detect';
 import { findAdapter, type SiteAdapter } from './webcopy-adapters';
+import { track } from './analytics';
+
+/** webcopy 动作统计（只报动作枚举，不含页面信息） */
+function trackWebcopy(action: 'page' | 'selection' | 'unlock' | 'tabs'): void {
+  void track({ name: 'webcopy', url: `/webcopy/${action}`, data: { action } });
+}
 
 /**
  * webcopy 的 SW 侧（技术方案 §2 / §6）：
@@ -59,6 +65,13 @@ export function setupWebcopy(): void {
 
   chrome.contextMenus.onClicked.addListener(async (info, tab) => {
     if (!tab?.id || !tab.url || isRestrictedUrl(tab.url)) return;
+    trackWebcopy(
+      info.menuItemId === MENU_ID.PAGE_MD
+        ? 'page'
+        : info.menuItemId === MENU_ID.SELECTION_MD
+          ? 'selection'
+          : 'unlock'
+    );
     try {
       // 百度文库等特殊站点：整页转换走适配器（主世界抓正文），并在主世界写剪贴板
       if (info.menuItemId === MENU_ID.PAGE_MD) {
@@ -202,6 +215,7 @@ async function runAdapter(
 export async function webcopyPageMd(): Promise<
   Response<WebCopyMdResult | WebCopyNeedsPermission>
 > {
+  trackWebcopy('page');
   const tab = await getActiveTab();
   if (!tab?.id || !tab.url) return { success: false, error: '找不到当前标签页' };
   if (isRestrictedUrl(tab.url)) {
@@ -231,6 +245,7 @@ export async function webcopyPageMd(): Promise<
 
 /** 选区转 Markdown */
 export function webcopySelectionMd() {
+  trackWebcopy('selection');
   return withInjectedTab<WebCopyMdResult>((tabId) =>
     sendToTab<WebCopyMdResult>(tabId, CONTENT_MSG.WEBCOPY_SELECTION_TO_MD, {})
   );
@@ -238,6 +253,7 @@ export function webcopySelectionMd() {
 
 /** 解锁开关 */
 export function webcopyToggleUnlock(enabled: boolean) {
+  trackWebcopy('unlock');
   return withInjectedTab<{ enabled: boolean }>((tabId) =>
     sendToTab<{ enabled: boolean }>(tabId, CONTENT_MSG.WEBCOPY_UNLOCK, {
       enabled,
@@ -273,6 +289,7 @@ export async function copyTabs(
   scope: 'current' | 'all',
   format: TabCopyFormat
 ): Promise<Response<{ text: string; count: number }>> {
+  trackWebcopy('tabs');
   const tabs = await chrome.tabs.query({
     currentWindow: true,
     ...(scope === 'current' ? { active: true } : {}),

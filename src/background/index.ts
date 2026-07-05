@@ -1,4 +1,4 @@
-import type { DocInfo, Message, Response } from '../shared/types';
+import type { DocInfo, Message, Response, TrackEvent } from '../shared/types';
 import { MSG } from '../shared/constants';
 import { getRuntimeState } from '../shared/storage';
 import { detectActiveDoc } from './doc-detect';
@@ -14,6 +14,7 @@ import { exportDiagnostic } from './diagnostic';
 import { getCookie } from './cookie';
 import { hasPermissionForHost, recordTrusted, revokePermission, listTrusted } from './permissions';
 import { startBridge, getBridgeStatus } from './bridge';
+import { track, initAnalytics } from './analytics';
 import {
   setupWebcopy,
   webcopyPageMd,
@@ -32,6 +33,9 @@ startBridge();
 
 // webcopy：右键菜单注册与分发（与飞书导出平行，互不干扰）
 setupWebcopy();
+
+// 匿名统计：安装/更新事件（可在设置页关闭）
+initAnalytics();
 
 // 点击图标弹出状态 popup（manifest 的 default_popup），侧边栏从 popup 里的按钮打开。
 // 注意：openPanelOnActionClick 是浏览器持久化的设置，旧版本设过 true，必须显式改回
@@ -104,9 +108,10 @@ async function handleMessage(
       const err = requireReady(doc);
       if (err) return err;
       // 电子表格走专门的内存抽取导出（docx 那套 client_vars 对表格是空的）
-      return doc!.docType === 'sheets'
-        ? exportSheet(doc!)
-        : exportMarkdown(doc!);
+      const isSheet = doc!.docType === 'sheets';
+      return trackedExport(isSheet ? 'sheet' : 'markdown', () =>
+        isSheet ? exportSheet(doc!) : exportMarkdown(doc!)
+      );
     }
 
     case MSG.EXPORT_WORD: {
@@ -117,19 +122,23 @@ async function handleMessage(
     case MSG.EXPORT_PDF: {
       const doc = await detectActiveDoc();
       const err = requireReady(doc);
-      return err ?? blockSheetOnly(doc!) ?? exportPdf(doc!);
+      return err ?? blockSheetOnly(doc!) ?? trackedExport('pdf', () => exportPdf(doc!));
     }
 
     case MSG.EXPORT_HTML: {
       const doc = await detectActiveDoc();
       const err = requireReady(doc);
-      return err ?? blockSheetOnly(doc!) ?? exportHtml(doc!);
+      return err ?? blockSheetOnly(doc!) ?? trackedExport('html', () => exportHtml(doc!));
     }
 
     case MSG.EXPORT_ATTACHMENTS: {
       const doc = await detectActiveDoc();
       const err = requireReady(doc);
-      return err ?? blockSheetOnly(doc!) ?? exportAttachments(doc!);
+      return (
+        err ??
+        blockSheetOnly(doc!) ??
+        trackedExport('attachments', () => exportAttachments(doc!))
+      );
     }
 
     case MSG.CACHE_DOC: {
@@ -186,6 +195,12 @@ async function handleMessage(
       return copyTabs(scope ?? 'all', format ?? 'markdown');
     }
 
+    // ---------- 匿名统计（UI 页面转发，SW 统一收口） ----------
+    case MSG.TRACK: {
+      void track(message.data as TrackEvent);
+      return { success: true };
+    }
+
     default:
       return { success: false, error: `未知消息类型: ${message.type}` };
   }
@@ -214,6 +229,25 @@ function requireReady(doc: DocInfo | null): Response | null {
     return { success: false, error: `暂不支持导出${unsupported}，当前仅支持文档（docx/wiki）与电子表格` };
   }
   return null;
+}
+
+/** 执行导出并上报结果（格式、成败、耗时秒），统计失败不影响导出 */
+async function trackedExport(
+  format: string,
+  run: () => Promise<Response>
+): Promise<Response> {
+  const started = Date.now();
+  const res = await run();
+  void track({
+    name: 'export',
+    url: `/export/${format}`,
+    data: {
+      format,
+      ok: !!res.success,
+      secs: Math.round((Date.now() - started) / 1000),
+    },
+  });
+  return res;
 }
 
 /** 电子表格只支持 Markdown/CSV 导出；PDF/HTML/附件对表格不适用，单独挡 */

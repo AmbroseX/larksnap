@@ -41,6 +41,12 @@ export function SidePanel() {
 
   // 启动时拉取上次进度 + 当前文档信息，并订阅后续进度推送
   useEffect(() => {
+    // 匿名统计：侧边栏打开即当日活跃（可在设置页关闭）
+    void sendToBackground(MSG.TRACK, {
+      name: 'open',
+      url: '/open/sidepanel',
+      data: { ui: 'sidepanel' },
+    });
     sendToBackground<RuntimeState>(MSG.GET_STATUS).then((res) => {
       const last = res.success ? res.data?.lastProgress : null;
       // 只恢复进行中的任务；上次已完成/失败的旧提示不再翻出来

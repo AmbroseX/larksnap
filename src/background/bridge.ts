@@ -19,6 +19,7 @@ import { exportMarkdown } from './exporters/markdown';
 import { exportSheet } from './exporters/sheet';
 import { exportPdf } from './exporters/pdf';
 import { exportHtml } from './exporters/html';
+import { track } from './analytics';
 
 const PORT = 19925;
 const PING_URL = `http://127.0.0.1:${PORT}/ping`;
@@ -277,6 +278,11 @@ async function runJob(job: Job): Promise<void> {
     else if (fmt === 'html') res = await exportHtml(doc);
     else res = await exportMarkdown(doc);
 
+    void track({
+      name: 'bridge',
+      url: '/bridge/task',
+      data: { ok: !!res?.success && !!artifact },
+    });
     if (!res?.success) {
       const message = res?.error || '导出失败';
       // 导出器把 NotLoggedInError 收敛为 error 文案，这里据文案识别登录态
@@ -292,6 +298,7 @@ async function runJob(job: Job): Promise<void> {
       });
     }
   } catch (err) {
+    void track({ name: 'bridge', url: '/bridge/task', data: { ok: false } });
     const message = err instanceof Error ? err.message : String(err);
     reply(job.id, { type: 'error', message });
   } finally {

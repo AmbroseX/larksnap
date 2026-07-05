@@ -78,6 +78,18 @@ export function Options() {
         </label>
       </section>
 
+      <section className="field checkbox">
+        <label>
+          <input
+            type="checkbox"
+            checked={config.analyticsEnabled}
+            onChange={(e) => update('analyticsEnabled', e.target.checked)}
+          />
+          匿名使用统计（仅功能使用次数与版本号，不含任何文档内容、地址或身份信息，
+          详见项目主页的隐私政策）
+        </label>
+      </section>
+
       <h2>网页复制</h2>
 
       <section className="field checkbox">

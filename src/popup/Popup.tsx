@@ -22,6 +22,8 @@ export function Popup() {
   const [copied, setCopied] = useState(false);
 
   useEffect(() => {
+    // 匿名统计：popup 打开即当日活跃（可在设置页关闭）
+    void sendToBackground(MSG.TRACK, { name: 'open', url: '/open/popup', data: { ui: 'popup' } });
     let alive = true;
     const poll = async () => {
       const res = await sendToBackground<BridgeStatus>(MSG.GET_BRIDGE_STATUS);

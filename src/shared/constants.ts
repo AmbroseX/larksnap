@@ -55,6 +55,8 @@ export const MSG = {
   WEBCOPY_ENSURE: 'webcopy_ensure',
   // 标签页链接复制
   COPY_TABS: 'copy_tabs',
+  // UI → SW：匿名统计事件（SW 统一收口上报）
+  TRACK: 'track',
 } as const;
 
 /** content script 内部消息类型（背景 → content） */
@@ -87,6 +89,10 @@ export const FEISHU_TOKEN_RE = /^[A-Za-z0-9]{16,}$/;
 /** 飞书文档支持的域名后缀 */
 export const FEISHU_HOSTS = ['feishu.cn', 'feishu.net', 'larksuite.com'];
 
+/** 匿名统计（Umami 自建实例）。上报内容见 src/background/analytics.ts 白名单 */
+export const UMAMI_HOST = 'https://umami.youmiai.ai';
+export const UMAMI_WEBSITE_ID = '2825d17d-e96c-4ec0-813b-4e2144cc25c1';
+
 /** 开源项目主页 */
 export const REPO_URL = 'https://github.com/AmbroseX/larksnap';
 
@@ -105,4 +111,5 @@ export const DEFAULT_CONFIG: ExtensionConfig = {
     autoCopyFormat: 'text',
     tabCopyFormat: 'markdown',
   },
+  analyticsEnabled: true,
 };

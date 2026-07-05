@@ -100,6 +100,30 @@ export interface ExtensionConfig {
   trustedDomains: string[];
   /** 网页复制（任意网页转 Markdown / 解锁 / 自动复制） */
   webcopy: WebCopyConfig;
+  /** 匿名使用统计开关（Umami，仅事件名+版本号，无任何文档内容/URL） */
+  analyticsEnabled: boolean;
+}
+
+// ==================== 匿名统计（Umami） ====================
+
+/** 允许上报的事件名（白名单，超出即丢弃） */
+export type TrackEventName =
+  | 'install'
+  | 'update'
+  | 'open'
+  | 'export'
+  | 'webcopy'
+  | 'bridge';
+
+/**
+ * 一次统计事件。隐私红线：data 只允许枚举串 / 布尔 / 整数，
+ * 禁止文档 token、标题、真实 URL、域名等任何可识别信息。
+ */
+export interface TrackEvent {
+  name: TrackEventName;
+  /** Umami 里展示的伪路径（如 /export/markdown），缺省用 /{name} */
+  url?: string;
+  data?: Record<string, string | number | boolean>;
 }
 
 // ==================== 网页复制（webcopy） ====================
