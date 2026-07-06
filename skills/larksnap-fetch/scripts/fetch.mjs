@@ -351,12 +351,15 @@ function handleLine(msg) {
       });
       return null;
     case 'need-auth':
+      // kind==='webpage'：普通网页转 Markdown 的授权入口和飞书不同，话术分叉
       fail({
         type: 'authentication',
         subtype: 'need_domain_auth',
-        message: `需要授权域名 ${msg.host || ''}（私有化部署域名的权限需用户手势授权，无法自动完成）。`,
+        message: `需要授权域名 ${msg.host || ''}（域名权限需用户手势授权，无法自动完成）。`,
         hint:
-          '让用户打开该域名下任意飞书页面 → 点扩展图标打开侧边栏 → 点「授权该域名」，完成后重跑本命令。',
+          msg.kind === 'webpage'
+            ? '让用户在 Chrome 打开该网页 → 点扩展图标打开侧边栏 → 点「授权访问该域名」，完成后重跑本命令。'
+            : '让用户打开该域名下任意飞书页面 → 点扩展图标打开侧边栏 → 点「授权该域名」，完成后重跑本命令。',
       });
       return null;
     case 'error': {

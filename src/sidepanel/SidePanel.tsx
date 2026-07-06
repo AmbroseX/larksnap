@@ -92,9 +92,9 @@ export function SidePanel() {
       if (granted) {
         await sendToBackground(MSG.REQUEST_PERMISSION, { pattern });
         await refreshDoc();
-        setStatus('已授权，可开始导出');
+        setStatus(doc.isFeishuDoc ? '已授权，可开始导出' : '已授权，可通过命令行后台抓取本页');
       } else {
-        setStatus('未授权，无法访问该私有化域名');
+        setStatus('未授权，无法访问该域名');
       }
     } finally {
       setAuthing(false);
@@ -137,6 +137,8 @@ export function SidePanel() {
 
   const needsAuth = !!doc?.isFeishuDoc && !!doc?.needsAuth;
   const notFeishu = doc != null && !doc.isFeishuDoc;
+  // 普通网页未授权：不挡侧边栏功能（有手势兜底），只给桥接后台抓取一个授权入口
+  const webNeedsAuth = notFeishu && !!doc?.needsAuth;
 
   return (
     <div className="panel">
@@ -179,7 +181,21 @@ export function SidePanel() {
 
       {/* 非飞书页面：网页复制区块为主入口；飞书页面：导出区块（现状） */}
       {notFeishu ? (
-        <WebCopyView />
+        <>
+          {webNeedsAuth && (
+            <div className="auth-banner">
+              <p>通过命令行（larksnap-fetch）后台抓取本网页，需先授权访问该域名。</p>
+              <button
+                className="auth-btn"
+                onClick={handleAuthorize}
+                disabled={authing}
+              >
+                {authing ? '授权中...' : '授权访问该域名'}
+              </button>
+            </div>
+          )}
+          <WebCopyView />
+        </>
       ) : (
         <main className="action-list">
           {ACTIONS.map((item) => (

@@ -29,8 +29,8 @@ const MENU_ID = {
   UNLOCK: 'webcopy-unlock',
 } as const;
 
-/** 浏览器保留页面，无法注入任何脚本 */
-function isRestrictedUrl(url: string): boolean {
+/** 浏览器保留页面，无法注入任何脚本（bridge 后台通道也复用此判断） */
+export function isRestrictedUrl(url: string): boolean {
   return (
     !/^https?:/i.test(url) ||
     url.startsWith('https://chrome.google.com/webstore') ||
@@ -109,7 +109,7 @@ export function setupWebcopy(): void {
   });
 }
 
-async function injectWebcopy(tabId: number): Promise<void> {
+export async function injectWebcopy(tabId: number): Promise<void> {
   await chrome.scripting.executeScript({
     target: { tabId },
     files: ['webcopy.js'],
@@ -155,7 +155,7 @@ async function copyInMainWorld(tabId: number, text: string): Promise<void> {
   });
 }
 
-async function sendToTab<T = unknown>(
+export async function sendToTab<T = unknown>(
   tabId: number,
   type: string,
   data?: unknown

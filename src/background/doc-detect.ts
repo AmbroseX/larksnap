@@ -24,7 +24,14 @@ export async function detectActiveDoc(): Promise<DocInfo | null> {
   if (!tab?.id || !tab.url) return null;
 
   const urlInfo = detectDocFromUrl(tab.url);
-  if (!urlInfo.isFeishuDoc) return urlInfo;
+  if (!urlInfo.isFeishuDoc) {
+    // 普通网页也判一次域名授权：侧边栏据此显示「授权访问该域名」入口
+    //（桥接后台抓取无用户手势，权限必须提前在侧边栏授好）
+    if (/^https?:/i.test(tab.url) && !(await hasPermissionForHost(hostOf(tab.url)))) {
+      return { ...urlInfo, needsAuth: true };
+    }
+    return urlInfo;
+  }
 
   // 标签页标题兜底：DOM 取不到标题时至少还有网页名，避免文件名退化成 token
   if (tab.title) urlInfo.title = stripSiteSuffix(tab.title);

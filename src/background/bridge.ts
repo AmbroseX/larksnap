@@ -8,12 +8,13 @@
 // 用 download sink 截获产物（zip/md 的 data URL）经 WS 回传；登录/授权缺失回 need-*。
 //
 // 端口/路径需与 skills/larksnap-fetch/scripts/bridge/protocol.mjs 保持一致。
-import type { DocInfo, ExportProgress, Response } from '../shared/types';
+import type { DocInfo, ExportProgress, Response, WebCopyMdResult } from '../shared/types';
 import { CONTENT_MSG } from '../shared/constants';
 import { detectDocFromUrl, stripSiteSuffix } from '../content/feishu-detect';
 import { hasPermissionForHost } from './permissions';
 import { setContentTab } from './feishu-proxy';
-import { setDownloadSink } from './download';
+import { safeName, setDownloadSink } from './download';
+import { injectWebcopy, isRestrictedUrl, sendToTab } from './webcopy';
 import { setProgressSink } from './progress';
 import { exportMarkdown } from './exporters/markdown';
 import { exportSheet } from './exporters/sheet';
@@ -222,7 +223,8 @@ async function runJob(job: Job): Promise<void> {
   try {
     const info = detectDocFromUrl(job.url);
     if (!info.isFeishuDoc) {
-      reply(job.id, { type: 'error', message: '不是受支持的飞书文档链接' });
+      // 普通网页：走 webcopy 通用管线转 Markdown
+      await runWebpageJob(job, info.host);
       return;
     }
 
@@ -305,6 +307,75 @@ async function runJob(job: Job): Promise<void> {
     setDownloadSink(null);
     setProgressSink(null);
     setContentTab(null);
+    if (tabId != null && job.opts.keepTab !== true) {
+      try {
+        await chrome.tabs.remove(tabId);
+      } catch {
+        /* 标签页可能已被关闭 */
+      }
+    }
+  }
+}
+
+/**
+ * 普通网页任务：后台开标签页 → 注入 webcopy.js → 整页转 Markdown 回传。
+ * 只支持 md 格式；产物是单个 .md 文件，图片保留为外链绝对 URL（不下载）。
+ */
+async function runWebpageJob(job: Job, host: string): Promise<void> {
+  const fmt = (job.format || 'md').toLowerCase();
+  // 开标签页之前先把能挡的都挡掉：格式 → 保留页 → 域名权限
+  if (fmt !== 'md') {
+    reply(job.id, { type: 'error', message: `普通网页只支持 md 格式（当前请求 ${fmt}）` });
+    return;
+  }
+  if (isRestrictedUrl(job.url)) {
+    reply(job.id, { type: 'error', message: '此页面不支持转换（浏览器保留页面或非 http/https 链接）' });
+    return;
+  }
+  if (!(await hasPermissionForHost(host))) {
+    // kind 字段让 Skill 端把授权引导话术切到普通网页口径
+    reply(job.id, { type: 'need-auth', host, kind: 'webpage' });
+    return;
+  }
+
+  let tabId: number | undefined;
+  try {
+    reply(job.id, { type: 'progress', message: '正在后台打开网页…', percent: 5 });
+    const tab = await chrome.tabs.create({ url: job.url, active: false });
+    tabId = tab.id;
+    if (tabId == null) throw new Error('无法打开标签页');
+    await waitForTabComplete(tabId);
+
+    reply(job.id, { type: 'progress', message: '正在转换为 Markdown…', percent: 60 });
+    await injectWebcopy(tabId);
+    const res = await sendToTab<WebCopyMdResult>(tabId, CONTENT_MSG.WEBCOPY_PAGE_TO_MD, {});
+    if (!res.success || !res.data?.markdown) {
+      void track({ name: 'bridge', url: '/bridge/task', data: { ok: false, kind: 'webpage' } });
+      reply(job.id, { type: 'error', message: res.error || '网页转换失败' });
+      return;
+    }
+
+    // 标题兜底用标签页标题原值（普通网页不去飞书站点后缀）
+    let title = res.data.title;
+    if (!title) {
+      try {
+        title = (await chrome.tabs.get(tabId)).title || '';
+      } catch {
+        /* 忽略 */
+      }
+    }
+    // safeName 是落盘安全的唯一防线：Skill 端写文件不再清洗文件名
+    const filename = `${safeName(title || '网页')}.md`;
+    void track({ name: 'bridge', url: '/bridge/task', data: { ok: true, kind: 'webpage' } });
+    reply(job.id, {
+      type: 'result',
+      filename,
+      dataUrl: `data:text/markdown;charset=utf-8,${encodeURIComponent(res.data.markdown)}`,
+    });
+  } catch (err) {
+    void track({ name: 'bridge', url: '/bridge/task', data: { ok: false, kind: 'webpage' } });
+    reply(job.id, { type: 'error', message: err instanceof Error ? err.message : String(err) });
+  } finally {
     if (tabId != null && job.opts.keepTab !== true) {
       try {
         await chrome.tabs.remove(tabId);
