@@ -14,7 +14,10 @@ jobs:
   release:
     runs-on: ubuntu-latest
     steps:
+      # fetch-depth: 0 拉全历史+tag 对象，否则读不到 annotated tag 的说明文字
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -36,6 +39,10 @@ jobs:
         id: ver
         run: echo "version=$(node -p "require('./package.json').version")" >> "$GITHUB_OUTPUT"
 
+      # 取 annotated tag 里手写的更新说明，作为 Release 正文（打 tag 时 -m 写的内容）
+      - name: Extract release notes from tag
+        run: git tag -l --format='%(contents)' "${GITHUB_REF_NAME}" > RELEASE_NOTES.md
+
       # 打 zip（用于 Chrome 应用商店上传）
       - name: Pack ZIP
         run: |
@@ -54,6 +61,8 @@ jobs:
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
+          # body_path=手写说明在上，generate_release_notes=自动 commit 对比链接追加在下
+          body_path: RELEASE_NOTES.md
           files: |
             larksnap-v${{ steps.ver.outputs.version }}.zip
             larksnap-v${{ steps.ver.outputs.version }}.crx
