@@ -40,8 +40,13 @@ jobs:
         run: echo "version=$(node -p "require('./package.json').version")" >> "$GITHUB_OUTPUT"
 
       # 取 annotated tag 里手写的更新说明，作为 Release 正文（打 tag 时 -m 写的内容）
+      # checkout 会把 annotated tag 降级成 lightweight，导致 %(contents) 取到 commit
+      # 信息，所以先强制从远端把带说明的 tag 对象拉回来覆盖本地。
       - name: Extract release notes from tag
-        run: git tag -l --format='%(contents)' "${GITHUB_REF_NAME}" > RELEASE_NOTES.md
+        run: |
+          git fetch --force origin "refs/tags/${GITHUB_REF_NAME}:refs/tags/${GITHUB_REF_NAME}"
+          git tag -l --format='%(contents)' "${GITHUB_REF_NAME}" > RELEASE_NOTES.md
+          cat RELEASE_NOTES.md
 
       # 打 zip（用于 Chrome 应用商店上传）
       - name: Pack ZIP
