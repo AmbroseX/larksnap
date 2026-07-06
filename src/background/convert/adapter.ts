@@ -56,6 +56,8 @@ function readExtra(entry: RawEntry, type: string): Record<string, unknown> {
     extra.language = (data.language as string) ?? (data.code as Record<string, unknown>)?.language ?? '';
   }
   if (type === 'table' || data.table) extra.table = data.table ?? data;
+  // 内嵌 sheet 块：token 挂 data.token 直下（实测确认，无 data.sheet 一层）
+  if (type === 'sheet' && typeof data.token === 'string') extra.sheetToken = data.token;
   if (type === 'callout' || data.callout) extra.callout = data.callout ?? data;
   if (type.startsWith('heading')) {
     const m = type.match(/heading(\d)/);

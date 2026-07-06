@@ -1,4 +1,4 @@
-import type { DocInfo, Response } from '../../shared/types';
+import type { DocInfo, EmbeddedSheetRef, Response } from '../../shared/types';
 import { reportProgress } from '../progress';
 import { resolveTargetTabId } from '../feishu-proxy';
 import { createZipDataUrl, type ZipFile } from '../zip';
@@ -112,8 +112,9 @@ function toMarkdown(title: string, sheets: SheetData[]): string {
 /**
  * 二维数组 → GFM 表格。第一行当表头。
  * 单元格里的竖线和换行会破坏表格，分别转义/换成 <br>。
+ * （docx 内嵌 sheet 块的替换也用它，勿改成私有）
  */
-function sheetToMdTable(rows: string[][]): string {
+export function sheetToMdTable(rows: string[][]): string {
   if (rows.length === 0) return '（空表）';
   const cols = Math.max(...rows.map((r) => r.length));
   const cell = (v: string) =>
@@ -136,6 +137,124 @@ function toCsv(rows: string[][]): string {
     return /[",\r\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
   };
   return rows.map((r) => r.map(esc).join(',')).join('\r\n');
+}
+
+// ==================== docx 内嵌 sheet 块抽取 ====================
+
+/**
+ * 读 docx 页面里内嵌 sheet 块的单元格（技术调研见
+ * docs/plans/2026-07-06-docx内嵌sheet块导出.md）。
+ *
+ * ⚠️ 和独立表格页不是一套全局：docx 页的模型在 `window.spread`（不是 spreadApp），
+ * 且不能用 getActiveSheet——多块时 active 的不一定是目标块，要按子表 id 在
+ * `spread.sheets[]` 里定位。已实测后台标签页（hidden + rAF 冻结）模型照常加载。
+ *
+ * 返回 blockId → 单元格二维数组；定位失败的块为 null（exporter 降级为链接）。
+ */
+export async function extractEmbeddedSheets(
+  refs: EmbeddedSheetRef[]
+): Promise<Record<string, string[][] | null>> {
+  const tabId = await resolveTargetTabId();
+  const [{ result } = { result: undefined }] =
+    await chrome.scripting.executeScript({
+      target: { tabId },
+      world: 'MAIN',
+      func: extractEmbeddedSheetsInPage,
+      args: [refs.map((r) => ({ blockId: r.blockId, subId: r.subId }))],
+    });
+  return (result as Record<string, string[][] | null>) ?? {};
+}
+
+/**
+ * 注入到 docx 页面 MAIN world 执行。**必须自包含**（不能引用外部变量）。
+ * 逐块：按子表 id 在 window.spread.sheets 里找模型；找不到就滚到块的 DOM 锚点
+ * （data-record-id）触发懒挂载再轮询；读全单元格后裁掉全空尾行/尾列。
+ */
+function extractEmbeddedSheetsInPage(
+  refs: { blockId: string; subId: string }[]
+): Promise<Record<string, string[][] | null>> {
+  const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+  const findSheet = (subId: string): any | null => {
+    const sp = (window as unknown as { spread?: any }).spread;
+    const list = sp?.sheets;
+    if (!list) return null;
+    for (const s of Array.from(list as any[])) {
+      try {
+        const id =
+          typeof s.id === 'function' ? String(s.id()) : String(s._id_ ?? '');
+        if (id === subId) return s;
+      } catch {
+        /* 单个模型异常忽略，继续找 */
+      }
+    }
+    return null;
+  };
+
+  const readGrid = (s: any): string[][] => {
+    const R = s.getRowCount();
+    const C = s.getColumnCount();
+    const g: string[][] = [];
+    for (let r = 0; r < R; r++) {
+      const row: string[] = [];
+      for (let c = 0; c < C; c++) {
+        let v = '';
+        try {
+          v = s.getText(r, c);
+        } catch {
+          /* 忽略单元格错误 */
+        }
+        row.push(v == null ? '' : String(v));
+      }
+      g.push(row);
+    }
+    // 裁掉全空尾行/尾列
+    let lr = -1;
+    let lc = -1;
+    for (let r = 0; r < g.length; r++)
+      for (let c = 0; c < g[r].length; c++)
+        if (g[r][c] !== '') {
+          if (r > lr) lr = r;
+          if (c > lc) lc = c;
+        }
+    return lr < 0 ? [] : g.slice(0, lr + 1).map((row) => row.slice(0, lc + 1));
+  };
+
+  const run = async () => {
+    const out: Record<string, string[][] | null> = {};
+    for (const { blockId, subId } of refs) {
+      let sheet = findSheet(subId);
+      if (!sheet) {
+        // 懒加载：滚到块的位置触发挂载，再轮询等模型（后台页定时器有节流，窗口留足）
+        document
+          .querySelector(`[data-record-id="${CSS.escape(blockId)}"]`)
+          ?.scrollIntoView();
+        for (let i = 0; i < 12 && !sheet; i++) {
+          await sleep(700);
+          sheet = findSheet(subId);
+        }
+      }
+      if (!sheet) {
+        out[blockId] = null;
+        continue;
+      }
+      // 刚挂载可能还在拉数：连续几轮仍全空才当真空表
+      let rows: string[][] = [];
+      for (let i = 0; i < 8; i++) {
+        try {
+          rows = readGrid(sheet);
+        } catch {
+          rows = [];
+        }
+        if (rows.length > 0 || i >= 4) break;
+        await sleep(700);
+      }
+      out[blockId] = rows;
+    }
+    return out;
+  };
+
+  return run().catch(() => ({}));
 }
 
 // ==================== 页面主世界抽取器 ====================

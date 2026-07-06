@@ -1,4 +1,9 @@
-import type { Block, MarkdownResult, MediaAsset } from '../../shared/types';
+import type {
+  Block,
+  EmbeddedSheetRef,
+  MarkdownResult,
+  MediaAsset,
+} from '../../shared/types';
 import { renderInline, plainText } from './apool';
 import { buildBlockTree, type BlockTree } from './adapter';
 
@@ -13,6 +18,7 @@ import { buildBlockTree, type BlockTree } from './adapter';
 interface Ctx {
   tree: BlockTree;
   images: MediaAsset[];
+  sheetBlocks: EmbeddedSheetRef[];
   seen: Set<string>;
 }
 
@@ -21,7 +27,7 @@ export function blocksToMarkdown(
   objToken: string
 ): MarkdownResult {
   const tree = buildBlockTree(clientVarsData, objToken);
-  const ctx: Ctx = { tree, images: [], seen: new Set() };
+  const ctx: Ctx = { tree, images: [], sheetBlocks: [], seen: new Set() };
   const parts: string[] = [];
   for (const id of tree.order) {
     const md = renderBlock(id, 0, ctx);
@@ -29,7 +35,7 @@ export function blocksToMarkdown(
   }
   const markdown =
     parts.join('\n\n').replace(/\n{3,}/g, '\n\n').trim() + '\n';
-  return { markdown, images: ctx.images };
+  return { markdown, images: ctx.images, sheetBlocks: ctx.sheetBlocks };
 }
 
 function renderBlock(id: string, depth: number, ctx: Ctx): string {
@@ -90,6 +96,9 @@ function renderBlock(id: string, depth: number, ctx: Ctx): string {
 
     case type === 'table':
       return renderTable(block, depth, ctx);
+
+    case type === 'sheet':
+      return renderSheetBlock(block, ctx);
 
     default: {
       // 未知块：保留后代文本，否则占位
@@ -157,6 +166,26 @@ function renderImage(block: Block, ctx: Ctx): string {
     height: img.height as number | undefined,
   });
   return `![${name}](feishu-asset://${token})`;
+}
+
+/**
+ * 内嵌 sheet 块：client_vars 里只有引用 token（`<sht token>_<子表id>`），单元格
+ * 数据在页面内存模型里。这里只收集引用 + 写占位符，取数由 exporter 注入页面完成
+ * （同图片 feishu-asset:// 占位的思路）。token 拆不出来则维持占位注释，不收集。
+ */
+function renderSheetBlock(block: Block, ctx: Ctx): string {
+  const token = String(block.extra.sheetToken ?? '');
+  // 按最后一个 _ 分割：前面是电子表格 token（本体可能含下划线），后面是子表 id
+  const cut = token.lastIndexOf('_');
+  if (cut <= 0 || cut === token.length - 1) {
+    return `<!-- 暂不支持的块类型: sheet -->`;
+  }
+  ctx.sheetBlocks.push({
+    blockId: block.id,
+    shtToken: token.slice(0, cut),
+    subId: token.slice(cut + 1),
+  });
+  return `feishu-sheet-block://${block.id}`;
 }
 
 function renderCallout(block: Block, depth: number, ctx: Ctx): string {

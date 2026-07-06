@@ -21,8 +21,17 @@ export async function exportHtml(doc: DocInfo): Promise<Response> {
     const resolved = await resolveObjToken(doc);
     const cv = await fetchClientVars(resolved);
     const data = (cv.data ?? {}) as Record<string, unknown>;
-    const { markdown, images } = blocksToMarkdown(data, resolved.objToken);
+    const { markdown, images, sheetBlocks } = blocksToMarkdown(data, resolved.objToken);
     const title = resolved.title || doc.title || doc.token;
+
+    // 内嵌 sheet 块：HTML 路径不取数（本次只做 md，见 docs/plans/2026-07-06-docx内嵌sheet块导出.md），
+    // 占位符替换为源表链接，别把裸 feishu-sheet-block:// 留在正文里
+    let md = markdown;
+    for (const ref of sheetBlocks) {
+      md = md
+        .split(`feishu-sheet-block://${ref.blockId}`)
+        .join(`[查看内嵌表格](https://${doc.host}/sheets/${ref.shtToken}?sheet=${ref.subId})`);
+    }
 
     // 下载图片 → token→URL 映射（成功内联 dataURL，失败降级在线 URL）
     const urlMap: Record<string, string> = {};
@@ -59,7 +68,7 @@ export async function exportHtml(doc: DocInfo): Promise<Response> {
     }
 
     await reportProgress('html', 'running', '正在生成单文件 HTML...', 97);
-    let body = await marked.parse(markdown);
+    let body = await marked.parse(md);
     for (const [token, url] of Object.entries(urlMap)) {
       body = body.split(`feishu-asset://${token}`).join(url);
     }

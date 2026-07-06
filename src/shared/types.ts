@@ -204,10 +204,22 @@ export interface MediaAsset {
   height?: number;
 }
 
-/** 转换器输出：Markdown 正文（含 feishu-asset:// 占位）+ 待下载素材 */
+/** docx 内嵌 sheet 块的引用（client_vars 里只有引用，单元格在页面内存模型里） */
+export interface EmbeddedSheetRef {
+  /** sheet 块自己的 id（dox…），DOM 锚点 data-record-id 用它 */
+  blockId: string;
+  /** 源电子表格 token（sht…），兜底链接用 */
+  shtToken: string;
+  /** 子表 id，在页面 window.spread.sheets 里按它定位模型 */
+  subId: string;
+}
+
+/** 转换器输出：Markdown 正文（含 feishu-asset:// / feishu-sheet-block:// 占位）+ 待处理素材 */
 export interface MarkdownResult {
   markdown: string;
   images: MediaAsset[];
+  /** 内嵌 sheet 块引用，exporter 取数后替换占位符 */
+  sheetBlocks: EmbeddedSheetRef[];
 }
 
 /** 运行时状态（背景写入，UI 读取） */

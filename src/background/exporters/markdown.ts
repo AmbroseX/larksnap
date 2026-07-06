@@ -15,6 +15,7 @@ import {
   invalidate,
 } from '../capability';
 import { blocksToMarkdown } from '../convert/markdown';
+import { extractEmbeddedSheets, sheetToMdTable } from './sheet';
 import { createZipDataUrl, type ZipFile } from '../zip';
 import { downloadBase64, downloadDataUrl, safeName } from '../download';
 import {
@@ -111,10 +112,39 @@ async function runDecodeMd(
     const data = (cv.data ?? {}) as Record<string, unknown>;
 
     await reportProgress('markdown', 'running', '正在转换为 Markdown...');
-    const { markdown, images } = blocksToMarkdown(data, resolved.objToken);
+    const { markdown, images, sheetBlocks } = blocksToMarkdown(
+      data,
+      resolved.objToken
+    );
 
     const title = resolved.title || doc.title || doc.token;
     let finalMd = markdown;
+
+    // 内嵌 sheet 块：注入页面读单元格，替换占位符。
+    // 必须在图片分支（imageMode 分叉）之前做，否则纯 .md / zip 两支会有一支漏替换。
+    if (sheetBlocks.length > 0) {
+      await reportProgress(
+        'markdown',
+        'running',
+        `正在读取 ${sheetBlocks.length} 个内嵌表格...`
+      );
+      let grids: Record<string, string[][] | null> = {};
+      try {
+        grids = await extractEmbeddedSheets(sheetBlocks);
+      } catch (e) {
+        // 整体失败（如标签页没了）：全部走兜底链接，不让整篇导出失败
+        console.warn('[larksnap] 内嵌表格读取失败，降级为链接:', e);
+      }
+      for (const ref of sheetBlocks) {
+        const rows = grids[ref.blockId];
+        const repl = rows
+          ? sheetToMdTable(rows)
+          : `[查看内嵌表格](https://${doc.host}/sheets/${ref.shtToken}?sheet=${ref.subId})` +
+            '\n<!-- 内嵌表格未能读取，已降级为链接 -->';
+        finalMd = replaceAll(finalMd, `feishu-sheet-block://${ref.blockId}`, repl);
+      }
+    }
+
     const files: ZipFile[] = [];
 
     if (config.imageMode === 'link' || images.length === 0) {
