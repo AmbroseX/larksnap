@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "LarkSnap · 飞书文档导出助手",
-  "version": "0.3.5",
+  "version": "0.3.6",
   "description": "在飞书文档页面一键导出为 Markdown / PDF / HTML，批量下载附件，支持离线缓存；任意网页一键转 Markdown、解除复制限制、选中自动复制。",
   "permissions": [
     "cookies",
