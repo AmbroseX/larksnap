@@ -7,12 +7,19 @@
 零配置、纯客户端、内容不外发，**兼容企业私有化自建域名**。不用去开放平台建应用、申请 API 权限 —— 直接复用浏览器里已登录的 Cookie 和飞书网页自身的内部接口。
 
 <p>
+  <a href="https://chromewebstore.google.com/detail/larksnap-%C2%B7-%E9%A3%9E%E4%B9%A6%E6%96%87%E6%A1%A3%E5%AF%BC%E5%87%BA%E5%8A%A9%E6%89%8B/gepndmikbdjpdedkfiejchmhmhegjeal"><img alt="chrome web store" src="https://img.shields.io/chrome-web-store/v/gepndmikbdjpdedkfiejchmhmhegjeal?label=Chrome%20Web%20Store&color=blue"></a>
   <img alt="manifest" src="https://img.shields.io/badge/Manifest-V3-4285F4">
   <img alt="stack" src="https://img.shields.io/badge/React%2018%20%2B%20Vite%20%2B%20TypeScript-3178C6">
   <img alt="license" src="https://img.shields.io/badge/license-Apache%202.0-green">
 </p>
 
 ## 安装
+
+### 方式一：Chrome 商店（推荐，自动更新）
+
+直接到 [Chrome 应用商店](https://chromewebstore.google.com/detail/larksnap-%C2%B7-%E9%A3%9E%E4%B9%A6%E6%96%87%E6%A1%A3%E5%AF%BC%E5%87%BA%E5%8A%A9%E6%89%8B/gepndmikbdjpdedkfiejchmhmhegjeal) 一键安装，后续版本自动更新。
+
+### 方式二：手动加载
 
 到 [Releases](https://github.com/AmbroseX/larksnap/releases) 下载最新 zip 并解压，然后：
 

@@ -7,12 +7,19 @@
 Zero config, fully client-side, nothing leaves your browser. Works with **self-hosted enterprise Feishu domains**. No open-platform app, no API permission requests — it reuses the cookies already in your browser and Feishu's own internal web APIs.
 
 <p>
+  <a href="https://chromewebstore.google.com/detail/larksnap-%C2%B7-%E9%A3%9E%E4%B9%A6%E6%96%87%E6%A1%A3%E5%AF%BC%E5%87%BA%E5%8A%A9%E6%89%8B/gepndmikbdjpdedkfiejchmhmhegjeal"><img alt="chrome web store" src="https://img.shields.io/chrome-web-store/v/gepndmikbdjpdedkfiejchmhmhegjeal?label=Chrome%20Web%20Store&color=blue"></a>
   <img alt="manifest" src="https://img.shields.io/badge/Manifest-V3-4285F4">
   <img alt="stack" src="https://img.shields.io/badge/React%2018%20%2B%20Vite%20%2B%20TypeScript-3178C6">
   <img alt="license" src="https://img.shields.io/badge/license-Apache%202.0-green">
 </p>
 
 ## Install
+
+### Option 1: Chrome Web Store (recommended, auto-updates)
+
+Install with one click from the [Chrome Web Store](https://chromewebstore.google.com/detail/larksnap-%C2%B7-%E9%A3%9E%E4%B9%A6%E6%96%87%E6%A1%A3%E5%AF%BC%E5%87%BA%E5%8A%A9%E6%89%8B/gepndmikbdjpdedkfiejchmhmhegjeal) — future versions update automatically.
+
+### Option 2: Load manually
 
 Download the latest zip from [Releases](https://github.com/AmbroseX/larksnap/releases), unzip it, then:
 
