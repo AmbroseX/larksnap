@@ -221,6 +221,12 @@ export async function editorStepInPage(p: EditorStepPayload): Promise<EditorStep
           message: `页面 DOM 里找不到块 ${p.blockId}（data-block-id 类属性未命中）`,
         };
       }
+      if (!node && p.mode === 'append') {
+        // 没给块 ID（分片粘贴的后续片 / 空文档）：取当前 DOM 里最后一个块当锚点
+        // （长文档虚拟化渲染下它就在当前视口附近，粘贴后视口本来就在尾部）
+        const all = root.querySelectorAll<HTMLElement>('[data-record-id],[data-block-id]');
+        node = all.length ? all[all.length - 1] : null;
+      }
       const base = {
         ok: true,
         textLenBefore: before.length,
@@ -228,9 +234,13 @@ export async function editorStepInPage(p: EditorStepPayload): Promise<EditorStep
         tailExisted: !!tailFp && before.includes(tailFp),
       };
       if (!node) {
-        // append 且拿不到块节点（空文档）：点编辑器内容区靠下位置，飞书会把光标放到文末
+        // 空文档：点编辑器内容区靠下位置（钳在视口内），飞书会把光标放到文末
         const r = root.getBoundingClientRect();
-        return { ...base, x: r.left + r.width / 2, y: Math.max(r.top + 10, r.bottom - 30) };
+        return {
+          ...base,
+          x: r.left + r.width / 2,
+          y: Math.min(Math.max(r.top + 10, r.bottom - 30), window.innerHeight - 10),
+        };
       }
       node.scrollIntoView({ block: 'center' });
       await sleep(300); // 等滚动与懒渲染稳定

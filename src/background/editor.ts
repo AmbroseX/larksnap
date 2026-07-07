@@ -357,6 +357,30 @@ async function verify(
 // ==================== CDP 可信输入（计划实验 1 第 3 级兜底） ====================
 
 /**
+ * 把 Markdown 按顶层块边界切成不超过 maxLen 字符的片：只在代码围栏之外的空行处
+ * 下刀，保证列表、代码块、表格不会被从中间切断。
+ */
+function splitMarkdown(md: string, maxLen: number): string[] {
+  if (md.length <= maxLen) return [md];
+  const chunks: string[] = [];
+  let cur: string[] = [];
+  let curLen = 0;
+  let inFence = false;
+  for (const line of md.split('\n')) {
+    if (/^\s*(```|~~~)/.test(line)) inFence = !inFence;
+    cur.push(line);
+    curLen += line.length + 1;
+    if (!inFence && curLen >= maxLen && line.trim() === '') {
+      chunks.push(cur.join('\n'));
+      cur = [];
+      curLen = 0;
+    }
+  }
+  if (cur.join('').trim()) chunks.push(cur.join('\n'));
+  return chunks;
+}
+
+/**
  * 用 chrome.debugger 发可信输入完成写入（合成事件被飞书编辑器忽略，实测结论）：
  *   stage-copy（屏外临时节点装 HTML 并选中）→ 可信 Copy（内容落系统剪贴板，会
  *   占用用户剪贴板，SKILL.md 有说明）→ locate（算目标坐标）→ 可信鼠标点击定位
@@ -403,9 +427,39 @@ async function cdpInject(
     await chrome.debugger.sendCommand(dbg, 'Emulation.setFocusEmulationEnabled', {
       enabled: true,
     });
-    if (base.mode !== 'delete') {
-      const staged = (await step({ action: 'stage-copy' })) as EditorStepResult;
-      if (!staged?.ok) return staged ?? { ok: false, message: '复制台搭建失败' };
+    // 可信鼠标点击：让飞书自己把光标放到目标位置
+    const click = async (x: number, y: number): Promise<void> => {
+      for (const type of ['mousePressed', 'mouseReleased'] as const) {
+        await chrome.debugger.sendCommand(dbg, 'Input.dispatchMouseEvent', {
+          type,
+          x,
+          y,
+          button: 'left',
+          clickCount: 1,
+        });
+      }
+    };
+    const sleep = (ms: number) => new Promise<void>((res) => setTimeout(res, ms));
+
+    // ---- 删除：点击 → Esc 块选中 → Backspace ----
+    if (base.mode === 'delete') {
+      const tg = (await step({ action: 'locate' })) as EditorStepResult;
+      if (!tg?.ok) return tg ?? { ok: false, message: '目标定位失败' };
+      await click(tg.x ?? 0, tg.y ?? 0);
+      await sleep(400); // 等编辑器完成光标定位
+      await key({ key: 'Escape', code: 'Escape', vk: 27 });
+      await sleep(300);
+      await key({ key: 'Backspace', code: 'Backspace', vk: 8 });
+      const vr = (await step({
+        action: 'verify',
+        textLenBefore: tg.textLenBefore,
+      })) as EditorStepResult;
+      if (!vr?.ok) return vr ?? { ok: false, message: '删除确认失败' };
+      return { ok: true, method: 'cdp:backspace' };
+    }
+
+    // ---- 写入：剪贴板工具 ----
+    {
       // 写剪贴板绝不能信任返回值：execCommand('copy') 在后台页会返回 true 但实际
       // 没写进系统剪贴板（实测，曾把上一次任务的旧剪贴板内容贴进文档造成污染）。
       // 所以：优先 async Clipboard API（失败会真拒绝），execCommand 原子「重选+复制」
@@ -463,79 +517,82 @@ async function cdpInject(
         });
         return r?.result === true;
       };
-      let copied = false;
-      for (let i = 0; i < 3 && !copied; i++) {
-        await writeClip();
-        copied = await verifyClip();
-        if (!copied) await new Promise((res) => setTimeout(res, 400));
-      }
-      if (!copied) {
-        return {
-          ok: false,
-          message: '内容写入系统剪贴板失败（回读校验三次未通过），为避免贴入旧内容已中止',
-        };
-      }
-    }
-    const tg = (await step({ action: 'locate' })) as EditorStepResult;
-    if (!tg?.ok) return tg ?? { ok: false, message: '目标定位失败' };
+      const ensureClipboard = async (): Promise<boolean> => {
+        for (let i = 0; i < 3; i++) {
+          await writeClip();
+          if (await verifyClip()) return true;
+          await sleep(400);
+        }
+        return false;
+      };
 
-    // 可信鼠标点击：让飞书自己把光标放到目标位置
-    const click = async (x: number, y: number): Promise<void> => {
-      for (const type of ['mousePressed', 'mouseReleased'] as const) {
-        await chrome.debugger.sendCommand(dbg, 'Input.dispatchMouseEvent', {
-          type,
-          x,
-          y,
-          button: 'left',
-          clickCount: 1,
+      // ---- 分片粘贴：飞书 md 解析对单次粘贴有量的上限（20KB 实测在 238 块处
+      // 截断丢尾），append 大内容按顶层块边界切成小片逐片贴 ----
+      const chunks =
+        plainOnly && base.mode === 'append'
+          ? splitMarkdown(base.text ?? '', 6000)
+          : [base.text ?? ''];
+      let firstLocate: EditorStepResult | null = null;
+      for (let ci = 0; ci < chunks.length; ci++) {
+        // 后续片一律贴到文末（前一片粘贴后文档结构已变，原锚点失效）
+        const chunkPatch = ci === 0 ? {} : { blockId: undefined };
+        const staged = (await step({
+          ...chunkPatch,
+          action: 'stage-copy',
+          text: chunks[ci],
+        })) as EditorStepResult;
+        if (!staged?.ok) return staged ?? { ok: false, message: '复制台搭建失败' };
+        if (!(await ensureClipboard())) {
+          return {
+            ok: false,
+            message: '内容写入系统剪贴板失败（回读校验三次未通过），为避免贴入旧内容已中止',
+          };
+        }
+        const tg = (await step({ ...chunkPatch, action: 'locate' })) as EditorStepResult;
+        if (!tg?.ok) return tg ?? { ok: false, message: '目标定位失败' };
+        if (ci === 0) firstLocate = tg;
+        await click(tg.x ?? 0, tg.y ?? 0);
+        await sleep(400); // 等编辑器完成光标定位
+
+        if (base.mode === 'replace' && ci === 0) {
+          // Esc：光标所在块进入"块选中"态，之后的粘贴替换整块
+          await key({ key: 'Escape', code: 'Escape', vk: 27 });
+        } else {
+          // append / after：光标已在锚点块末尾，先回车新起一块再粘贴，
+          // 否则粘贴的首段会并进锚点块内部（标题块尤其难看）
+          await key({ key: 'Enter', code: 'Enter', vk: 13 });
+        }
+        await sleep(300);
+
+        // 粘贴走内容脚本世界的 execCommand('paste')（需要 clipboardRead 权限）：
+        // 浏览器会对焦点编辑器派发真正可信的 paste 事件，飞书按正常粘贴处理。
+        // mac 上 CDP 按键附带的 Paste 编辑命令进不了渲染进程，不能依赖。
+        const [pasted] = await chrome.scripting.executeScript({
+          target: { tabId },
+          func: () => document.execCommand('paste'),
+        });
+        if (pasted?.result !== true) {
+          // 退回可信按键（Windows/Linux 上修饰键组合由渲染进程自己映射）
+          await key({ key: 'v', code: 'KeyV', vk: 86, commands: ['Paste'] });
+        }
+        // 每片都等飞书把 md 转完块再继续（渐进式转换，急着走会截断/错位）
+        await step({
+          action: 'settle',
+          timeoutMs: Math.min(60000, 5000 + chunks[ci].length * 2),
         });
       }
-    };
-    await click(tg.x ?? 0, tg.y ?? 0);
-    await new Promise((res) => setTimeout(res, 400)); // 等编辑器完成光标定位
 
-    if (base.mode === 'replace' || base.mode === 'delete') {
-      // Esc：光标所在块进入"块选中"态，之后的粘贴/退格作用于整块
-      await key({ key: 'Escape', code: 'Escape', vk: 27 });
-      await new Promise((res) => setTimeout(res, 300));
-    } else {
-      // append / after：光标已在锚点块末尾，先回车新起一块再粘贴，
-      // 否则粘贴的首段会并进锚点块内部（标题块尤其难看）
-      await key({ key: 'Enter', code: 'Enter', vk: 13 });
-      await new Promise((res) => setTimeout(res, 300));
+      const vr = (await step({
+        action: 'verify',
+        textLenBefore: firstLocate?.textLenBefore,
+        fingerprintExisted: firstLocate?.fingerprintExisted,
+        tailExisted: firstLocate?.tailExisted,
+        // 大内容飞书要渲染更久，超时按内容大小自适应（19KB 实测 5s 不够）
+        timeoutMs: Math.min(30000, 5000 + (base.text?.length ?? 0)),
+      })) as EditorStepResult;
+      if (!vr?.ok) return vr ?? { ok: false, message: '写入确认失败' };
+      return { ok: true, method: 'cdp:paste' };
     }
-    if (base.mode === 'delete') {
-      await key({ key: 'Backspace', code: 'Backspace', vk: 8 });
-    } else {
-      // 粘贴走内容脚本世界的 execCommand('paste')（需要 clipboardRead 权限）：
-      // 浏览器会对焦点编辑器派发真正可信的 paste 事件，飞书按正常粘贴处理。
-      // mac 上 CDP 按键附带的 Paste 编辑命令进不了渲染进程，不能依赖。
-      const [pasted] = await chrome.scripting.executeScript({
-        target: { tabId },
-        func: () => document.execCommand('paste'),
-      });
-      if (pasted?.result !== true) {
-        // 退回可信按键（Windows/Linux 上修饰键组合由渲染进程自己映射）
-        await key({ key: 'v', code: 'KeyV', vk: 86, commands: ['Paste'] });
-      }
-    }
-    const vr = (await step({
-      action: 'verify',
-      textLenBefore: tg.textLenBefore,
-      fingerprintExisted: tg.fingerprintExisted,
-      tailExisted: tg.tailExisted,
-      // 大内容飞书要渲染更久，超时按内容大小自适应（19KB 实测 5s 不够）
-      timeoutMs: Math.min(30000, 5000 + (base.text?.length ?? 0)),
-    })) as EditorStepResult;
-    if (!vr?.ok) return vr ?? { ok: false, message: '写入确认失败' };
-    if (base.mode !== 'delete') {
-      // 等飞书把粘贴内容全部转完块再交回（大段 md 渐进式转换，提前退出会截断）
-      await step({
-        action: 'settle',
-        timeoutMs: Math.min(60000, 5000 + (base.text?.length ?? 0) * 2),
-      });
-    }
-    return { ok: true, method: base.mode === 'delete' ? 'cdp:backspace' : 'cdp:paste' };
   } finally {
     try {
       await chrome.debugger.detach(dbg);
