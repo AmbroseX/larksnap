@@ -14,3 +14,4 @@ ref/
 # 内部资料（草稿/参考PRD）
 docs/internal/
 review.md
+.playwright-mcp/
