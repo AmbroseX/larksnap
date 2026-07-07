@@ -36,6 +36,12 @@ function log(...a) {
   }
 }
 
+// 兜底：daemon detached 运行、stdio 全丢弃，未捕获异常必须落日志否则死得无痕
+process.on('uncaughtException', (e) => {
+  log('uncaught exception', e instanceof Error ? e.stack || e.message : String(e));
+  process.exit(1);
+});
+
 const extConns = new Map(); // contextId -> WSConnection（每个浏览器 profile 一条）
 const pending = new Map(); // jobId -> { res, contextId }（CLI 流式响应）
 let jobSeq = 0;
@@ -171,6 +177,18 @@ const httpServer = createServer(async (req, res) => {
       res.end(JSON.stringify({ type: 'error', subtype: routed.subtype, message: routed.error }) + '\n');
       return;
     }
+    // 旧扩展不认识 kind='edit'，会把它当普通抓取任务执行 → 必须挡在派发之前
+    if (job.kind === 'edit' && (routed.conn._proto ?? 0) < 2) {
+      res.writeHead(200, { 'content-type': 'application/x-ndjson' });
+      res.end(
+        JSON.stringify({
+          type: 'error',
+          subtype: 'extension_outdated',
+          message: `扩展协议版本过旧（v${routed.conn._proto ?? '?'}），不支持编辑任务。`,
+        }) + '\n'
+      );
+      return;
+    }
     // 流式响应：进度/结果逐行写回，结束时 end
     const id = `j${++jobSeq}`;
     res.writeHead(200, { 'content-type': 'application/x-ndjson', 'cache-control': 'no-cache' });
@@ -180,6 +198,7 @@ const httpServer = createServer(async (req, res) => {
       pending.delete(id); // CLI 提前断开
       armIdle();
     });
+    // 编辑任务字段（kind/op/contentMd/anchor）原样透传，daemon 不理解语义
     routed.conn.send(
       JSON.stringify({
         type: 'job',
@@ -187,9 +206,10 @@ const httpServer = createServer(async (req, res) => {
         url: job.url,
         format: job.format || 'md',
         opts: job.opts || {},
+        ...(job.kind ? { kind: job.kind, op: job.op, contentMd: job.contentMd, anchor: job.anchor } : {}),
       })
     );
-    log('dispatch', id, routed.conn._contextId, job.url);
+    log('dispatch', id, routed.conn._contextId, job.kind ? `${job.kind}:${job.op}` : '', job.url);
     return;
   }
 
@@ -238,6 +258,7 @@ attachWsServer(httpServer, {
       if (msg.type === 'hello') {
         const cid = (msg.contextId && String(msg.contextId)) || 'default';
         conn._contextId = cid;
+        conn._proto = msg.protocolVersion ?? 0; // 编辑任务派发前校验（旧扩展会把 edit 误当抓取执行）
         extConns.set(cid, conn);
         // 回握手：daemon 版本（popup 展示）+ 协议版本（不匹配时扩展提示更新，不硬断以免升级期全瘫）
         const extProto = msg.protocolVersion ?? null;

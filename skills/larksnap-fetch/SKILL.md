@@ -1,6 +1,6 @@
 ---
 name: larksnap-fetch
-description: 把一个飞书/Lark 文档链接或普通网页链接抓取并保存到本地目录（飞书文档支持 Markdown/PDF/HTML + 图片附件;普通网页只支持 Markdown,图片保留外链）。arXiv 论文（贴链接或裸 ID 均可）走独立脚本,把 PDF、HTML 和转好的 Markdown 一起下载,不依赖浏览器扩展。当用户在任意项目里贴出飞书文档或任意网页 URL 并希望下载/保存/导出/拉取/抓取到本地某路径时,务必使用本技能,即使用户没明说"用 larksnap"或"用扩展"。底层通过本地 daemon 桥接到已登录的 larksnap 浏览器扩展,扩展持有登录态与导出引擎;遇到未登录/未授权域名时会按退出码提示用户去浏览器登录或授权。本技能自包含(daemon 随技能分发),可从任何项目调用,不依赖 larksnap 仓库。
+description: 把一个飞书/Lark 文档链接或普通网页链接抓取并保存到本地目录（飞书文档支持 Markdown/PDF/HTML + 图片附件;普通网页只支持 Markdown,图片保留外链）,也能把 Markdown 内容写进用户有编辑权限的飞书文档（追加/按标题或块插入/替换块/删除块,先 list-blocks 看清块结构再动手）。arXiv 论文（贴链接或裸 ID 均可）走独立脚本,把 PDF、HTML 和转好的 Markdown 一起下载,不依赖浏览器扩展。当用户在任意项目里贴出飞书文档或任意网页 URL 并希望下载/保存/导出/拉取/抓取到本地某路径,或希望把内容写入/追加/更新到某篇飞书文档时,务必使用本技能,即使用户没明说"用 larksnap"或"用扩展"。底层通过本地 daemon 桥接到已登录的 larksnap 浏览器扩展,扩展持有登录态与导出/编辑引擎;遇到未登录/未授权域名时会按退出码提示用户去浏览器登录或授权。本技能自包含(daemon 随技能分发),可从任何项目调用,不依赖 larksnap 仓库。
 ---
 
 # larksnap-fetch
@@ -44,6 +44,44 @@ node ~/.claude/skills/larksnap-fetch/scripts/fetch.mjs <飞书链接> <输出目
 - `--profile <code>`:当有多个浏览器 profile 同时连到 daemon 时,指定用哪一个(code 见扩展弹窗的 Profile,可点 Copy 复制)。只有一个时无需指定。
 
 退出码:`0` 成功 ｜ `1` 失败 ｜ `2` 用法错 ｜ `3` 需登录 ｜ `4` 需授权域名 ｜ `5` 桥接未就绪。
+
+## 编辑飞书文档(写入 Markdown 内容)
+
+`edit.mjs` 是 fetch 的姊妹动作,共用同一个 daemon 与扩展:扩展在后台标签页里**像用户一样把内容
+粘贴进飞书编辑器**(CDP 可信输入:真实剪贴板 + 可信鼠标点击/按键),协同保存由飞书前端自己完成。
+前提:用户在浏览器里对该文档有**编辑权限**。两个副作用要让用户知道:**编辑期间会占用系统剪贴板**
+(写入内容会覆盖用户当前复制的东西);任务执行的几秒内浏览器顶部会出现"正在调试此浏览器"横幅,结束即消失。
+
+```bash
+node ~/.claude/skills/larksnap-fetch/scripts/edit.mjs <链接> append <md文件>
+node ~/.claude/skills/larksnap-fetch/scripts/edit.mjs <链接> insert-after "<标题文本>" <md文件>
+node ~/.claude/skills/larksnap-fetch/scripts/edit.mjs <链接> list-blocks
+node ~/.claude/skills/larksnap-fetch/scripts/edit.mjs <链接> replace-block <块ID> <md文件> --expect "<内容摘要>"
+node ~/.claude/skills/larksnap-fetch/scripts/edit.mjs <链接> delete-block <块ID> --expect "<内容摘要>"
+node ~/.claude/skills/larksnap-fetch/scripts/edit.mjs <链接> insert-after-block <块ID> <md文件>
+```
+
+- **写入内容一律先写进本地 md 文件**再把文件路径传给命令(不走命令行参数,避免转义和长度问题);上限 2MB。
+- 只支持 docx / wiki 文档;电子表格、多维表格不支持编辑。
+- **块级操作先 `list-blocks` 再动手**:输出 JSON `{blocks:[{id,parentId,type,depth,childCount,summary}]}`,
+  `summary` 是块内容前 80 字。`replace-block`/`delete-block` 必须带 `--expect "<摘要>"`(原样复制
+  list-blocks 输出里目标块的 `summary`)——扩展执行前比对该块当前内容,对不上报 `block_changed`,
+  防止文档被并发修改后改错/删错块。删除容器块(列表/引用等)会连同其子块一起删,动手前用
+  `parentId`/`depth`/`childCount` 确认不会误删一整节。
+- `insert-after` 按标题文本**精确匹配**:找不到报 `anchor_not_found`,多于一个报 `anchor_ambiguous`
+  (此时改用 `insert-after-block` 以块 ID 定位)。
+- 写入成功的判定是**回读校验**:编辑后重新导出全文,确认新内容已落地才回成功。报
+  `save_unconfirmed` 时内容可能已进文档,**不要盲目重跑**(可能写两次),让用户打开文档人工确认。
+- **编辑成功后想继续做块级操作,先重新 `list-blocks`**。飞书的块按 ID 寻址,没被动过的块
+  ID 编辑后依然有效,但有两类引用一定作废:① `replace-block` 会换块 ID(飞书按"删旧块+
+  插新块"处理),旧 ID 直接失效;② 刚写入的内容你手里没有它的块 ID。拿旧清单硬做会撞上
+  `block_not_found` / `block_changed`,重跑一次 `list-blocks` 最省事。
+- 编辑专属退出码:`6` = 已登录但对该文档只读(`need_edit_permission`),让用户在浏览器里确认/申请
+  编辑权限后重跑;`7` = 扩展缺少调试权限(`need_edit_grant`,一般是装了不带编辑功能的旧版扩展),
+  让用户更新/重载扩展。其余退出码与 fetch.mjs 相同。
+- 编辑专属错误 subtype(退出码 1):`anchor_not_found` / `anchor_ambiguous` / `block_not_found` /
+  `block_changed`(重新 list-blocks 后重试) / `save_unconfirmed`(人工确认) / `inject_failed`。
+- `extension_outdated`(退出码 5):扩展版本太旧不支持编辑,让用户更新/重新构建扩展。
 
 ## 普通网页转 Markdown
 
