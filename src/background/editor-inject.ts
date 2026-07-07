@@ -20,7 +20,7 @@ export interface EditorStepPayload {
   /** synthetic=合成 paste 快速尝试；stage-copy=搭临时复制台；
    *  locate=算出目标点击坐标（可信鼠标点击才能驱动飞书的选区模型）；
    *  verify=轮询内容指纹确认生效 */
-  action: 'synthetic' | 'stage-copy' | 'locate' | 'verify';
+  action: 'synthetic' | 'stage-copy' | 'locate' | 'verify' | 'settle';
   /** append=文末追加；after=目标块后插入；replace=替换目标块；delete=删除目标块 */
   mode: 'append' | 'after' | 'replace' | 'delete';
   /** 目标块 ID（append 时是最后一个顶层块，用于把光标放到文末） */
@@ -284,6 +284,30 @@ export async function editorStepInPage(p: EditorStepPayload): Promise<EditorStep
         reason: 'verify-timeout',
         message: '可信输入后编辑器内容未出现预期变化',
       };
+    }
+
+    // ============ CDP 第 4 步：等转换稳定 ============
+    // 大段 Markdown 粘贴后飞书是渐进式解析转块的，转换没做完就关标签页会截断内容
+    // （实测 20KB 丢了尾部）。轮询块数量与文本长度，连续 3 秒不变才算转换完成。
+    case 'settle': {
+      const limit = p.timeoutMs ?? 15000;
+      const snap = () =>
+        `${document.querySelectorAll('[data-record-id],[data-block-id]').length}:${editorText().length}`;
+      const t0 = Date.now();
+      let last = snap();
+      let stableSince = Date.now();
+      while (Date.now() - t0 < limit) {
+        await sleep(500);
+        const now = snap();
+        if (now !== last) {
+          last = now;
+          stableSince = Date.now();
+        } else if (Date.now() - stableSince >= 3000) {
+          return { ok: true };
+        }
+      }
+      // 超时不算失败：后面还有服务端回读把关
+      return { ok: true };
     }
   }
   return { ok: false, message: `未知步骤 ${String(p.action)}` };

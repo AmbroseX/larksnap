@@ -528,6 +528,13 @@ async function cdpInject(
       timeoutMs: Math.min(30000, 5000 + (base.text?.length ?? 0)),
     })) as EditorStepResult;
     if (!vr?.ok) return vr ?? { ok: false, message: '写入确认失败' };
+    if (base.mode !== 'delete') {
+      // 等飞书把粘贴内容全部转完块再交回（大段 md 渐进式转换，提前退出会截断）
+      await step({
+        action: 'settle',
+        timeoutMs: Math.min(60000, 5000 + (base.text?.length ?? 0) * 2),
+      });
+    }
     return { ok: true, method: base.mode === 'delete' ? 'cdp:backspace' : 'cdp:paste' };
   } finally {
     try {
