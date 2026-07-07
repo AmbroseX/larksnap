@@ -14,7 +14,8 @@ import { detectDocFromUrl, stripSiteSuffix } from '../content/feishu-detect';
 import { hasPermissionForHost } from './permissions';
 import { setContentTab } from './feishu-proxy';
 import { safeName, setDownloadSink } from './download';
-import { injectWebcopy, isRestrictedUrl, sendToTab } from './webcopy';
+import { injectWebcopy, isRestrictedUrl, runAdapter, sendToTab } from './webcopy';
+import { findAdapter } from './webcopy-adapters';
 import { setProgressSink } from './progress';
 import { exportMarkdown } from './exporters/markdown';
 import { exportSheet } from './exporters/sheet';
@@ -346,17 +347,53 @@ async function runWebpageJob(job: Job, host: string): Promise<void> {
     if (tabId == null) throw new Error('无法打开标签页');
     await waitForTabComplete(tabId);
 
-    reply(job.id, { type: 'progress', message: '正在转换为 Markdown…', percent: 60 });
-    await injectWebcopy(tabId);
-    const res = await sendToTab<WebCopyMdResult>(tabId, CONTENT_MSG.WEBCOPY_PAGE_TO_MD, {});
-    if (!res.success || !res.data?.markdown) {
-      void track({ name: 'bridge', url: '/bridge/task', data: { ok: false, kind: 'webpage' } });
-      reply(job.id, { type: 'error', message: res.error || '网页转换失败' });
-      return;
+    // 适配器站点（小红书等）：正文不在 DOM 里或必须持登录态，先于通用管线走主世界抓取。
+    // 用标签页最终 URL 匹配（xhslink.com 等短链 302 后才落到真实域名）。
+    let finalUrl = job.url;
+    try {
+      finalUrl = (await chrome.tabs.get(tabId)).url || job.url;
+    } catch {
+      /* 用原 URL */
+    }
+    let md: WebCopyMdResult | null = null;
+    const adapter = findAdapter(finalUrl);
+    if (adapter) {
+      const finalHost = new URL(finalUrl).hostname;
+      if (finalHost !== host && !(await hasPermissionForHost(finalHost))) {
+        // 短链跳转后落在未授权域名：按最终域名引导授权
+        reply(job.id, { type: 'need-auth', host: finalHost, kind: 'webpage' });
+        return;
+      }
+      reply(job.id, { type: 'progress', message: '正在提取页面内容…', percent: 60 });
+      const r = await runAdapter(tabId, adapter);
+      if (r?.abort === 'need-login') {
+        // 带 host+kind 让 fetch.mjs 按站点措辞（默认文案写死了"飞书"）
+        reply(job.id, { type: 'need-login', host: finalHost, kind: 'webpage' });
+        return;
+      }
+      if (r?.abort) {
+        void track({ name: 'bridge', url: '/bridge/task', data: { ok: false, kind: 'webpage' } });
+        reply(job.id, { type: 'error', message: r.note || '页面无法抓取' });
+        return;
+      }
+      if (r?.markdown) md = r;
+      // r == null：适配器不适用此页 → 退通用管线
+    }
+
+    if (!md) {
+      reply(job.id, { type: 'progress', message: '正在转换为 Markdown…', percent: 60 });
+      await injectWebcopy(tabId);
+      const res = await sendToTab<WebCopyMdResult>(tabId, CONTENT_MSG.WEBCOPY_PAGE_TO_MD, {});
+      if (!res.success || !res.data?.markdown) {
+        void track({ name: 'bridge', url: '/bridge/task', data: { ok: false, kind: 'webpage' } });
+        reply(job.id, { type: 'error', message: res.error || '网页转换失败' });
+        return;
+      }
+      md = res.data;
     }
 
     // 标题兜底用标签页标题原值（普通网页不去飞书站点后缀）
-    let title = res.data.title;
+    let title = md.title;
     if (!title) {
       try {
         title = (await chrome.tabs.get(tabId)).title || '';
@@ -370,7 +407,7 @@ async function runWebpageJob(job: Job, host: string): Promise<void> {
     reply(job.id, {
       type: 'result',
       filename,
-      dataUrl: `data:text/markdown;charset=utf-8,${encodeURIComponent(res.data.markdown)}`,
+      dataUrl: `data:text/markdown;charset=utf-8,${encodeURIComponent(md.markdown)}`,
     });
   } catch (err) {
     void track({ name: 'bridge', url: '/bridge/task', data: { ok: false, kind: 'webpage' } });

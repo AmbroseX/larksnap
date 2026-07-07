@@ -7,7 +7,7 @@ import type {
 } from '../shared/types';
 import { CONTENT_MSG } from '../shared/constants';
 import { getActiveTab } from './doc-detect';
-import { findAdapter, type SiteAdapter } from './webcopy-adapters';
+import { findAdapter, type AdapterExtractResult, type SiteAdapter } from './webcopy-adapters';
 import { track } from './analytics';
 
 /** webcopy 动作统计（只报动作枚举，不含页面信息） */
@@ -78,11 +78,16 @@ export function setupWebcopy(): void {
         const adapter = findAdapter(tab.url);
         if (adapter) {
           const result = await runAdapter(tab.id, adapter);
+          if (result?.abort) {
+            // 确定性失败（登录墙/风控/不存在）：提示原因，不退通用管线
+            await toastInMainWorld(tab.id, result.note || '页面无法抓取');
+            return;
+          }
           if (result) {
             await copyInMainWorld(tab.id, result.markdown);
             return;
           }
-          // 适配器没抓到：继续走通用管线
+          // 适配器不适用此页：继续走通用管线
         }
       }
 
@@ -113,6 +118,33 @@ export async function injectWebcopy(tabId: number): Promise<void> {
   await chrome.scripting.executeScript({
     target: { tabId },
     files: ['webcopy.js'],
+  });
+}
+
+/** 在页面上弹一条提示（适配器 abort 时告知用户失败原因） */
+async function toastInMainWorld(tabId: number, text: string): Promise<void> {
+  await chrome.scripting.executeScript({
+    target: { tabId },
+    world: 'MAIN',
+    func: (t: string) => {
+      const el = document.createElement('div');
+      el.textContent = t;
+      Object.assign(el.style, {
+        position: 'fixed',
+        right: '16px',
+        bottom: '16px',
+        zIndex: '2147483647',
+        padding: '8px 14px',
+        borderRadius: '8px',
+        background: 'rgba(180,40,40,0.92)',
+        color: '#fff',
+        fontSize: '13px',
+        maxWidth: '360px',
+      });
+      document.documentElement.appendChild(el);
+      setTimeout(() => el.remove(), 3500);
+    },
+    args: [text],
   });
 }
 
@@ -196,19 +228,21 @@ async function withInjectedTab<T>(
 
 /**
  * 站点适配器路径：在页面主世界执行 extractor（读页面全局变量 + 跨域 fetch）。
- * 命中返回结果；extractor 返回 null（拿不到数据）返回 null 让上层退回通用管线。
+ * 命中返回结果（含带 abort 的确定性失败，此时不应退通用管线）；
+ * extractor 返回 null（不适用此页）才返回 null 让上层退回通用管线。
+ * bridge 后台通道也复用此函数。
  */
-async function runAdapter(
+export async function runAdapter(
   tabId: number,
   adapter: SiteAdapter
-): Promise<WebCopyMdResult | null> {
+): Promise<AdapterExtractResult | null> {
   const [injection] = await chrome.scripting.executeScript({
     target: { tabId },
     world: 'MAIN',
     func: adapter.extractor,
   });
-  const result = injection?.result as WebCopyMdResult | null;
-  return result && result.markdown ? result : null;
+  const result = injection?.result as AdapterExtractResult | null;
+  return result && (result.markdown || result.abort) ? result : null;
 }
 
 /** 整页转 Markdown（结果回传侧边栏，由侧边栏写剪贴板/下载） */
@@ -226,8 +260,12 @@ export async function webcopyPageMd(): Promise<
   if (adapter) {
     try {
       const result = await runAdapter(tab.id, adapter);
+      if (result?.abort) {
+        // 确定性失败（登录墙/风控/不存在）：回明确错误，不退通用管线
+        return { success: false, error: result.note || '页面无法抓取' };
+      }
       if (result) return { success: true, data: result };
-      // 适配器没抓到数据：退回通用管线
+      // 适配器不适用此页：退回通用管线
     } catch {
       const host = new URL(tab.url).hostname;
       return {

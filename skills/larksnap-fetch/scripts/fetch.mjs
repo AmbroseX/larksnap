@@ -266,10 +266,11 @@ function runCommand() {
             const line = acc.slice(0, idx);
             acc = acc.slice(idx + 1);
             if (line.trim()) {
+              // result 分支返回 Promise（要先把图片下载完），其余分支返回数字或 null
               const code = handleLine(JSON.parse(line));
               if (code != null && !resolved) {
                 resolved = true;
-                exit(code);
+                Promise.resolve(code).then(exit);
               }
             }
           }
@@ -343,11 +344,18 @@ function handleLine(msg) {
       );
       return null;
     case 'need-login':
+      // kind==='webpage'：普通网页（如小红书）要求登录的是站点本身，不是飞书，按 host 措辞
       fail({
         type: 'authentication',
         subtype: 'need_login',
-        message: '需要登录：浏览器里没有该域名的飞书登录态。',
-        hint: '让用户在 Chrome 中打开该文档域名并登录飞书，登录完成后重跑本命令。',
+        message:
+          msg.kind === 'webpage'
+            ? `需要登录：浏览器里没有 ${msg.host || '该网站'} 的登录态。`
+            : '需要登录：浏览器里没有该域名的飞书登录态。',
+        hint:
+          msg.kind === 'webpage'
+            ? `让用户在 Chrome 中打开并登录 ${msg.host || '该网站'}，登录完成后重跑本命令。`
+            : '让用户在 Chrome 中打开该文档域名并登录飞书，登录完成后重跑本命令。',
       });
       return null;
     case 'need-auth':
@@ -376,9 +384,12 @@ function handleLine(msg) {
     case 'result': {
       try {
         const { folder, written } = deliver(msg.filename, msg.dataUrl, outDir);
-        console.log(`✓ 已导出到 ${path.resolve(folder)}`);
-        for (const w of written) console.log('   -', w);
-        return 0;
+        // 小红书等站点的 CDN 图片外链下载到本地（异步，全部落地后才打结果退出）
+        return localizeCdnImages(folder, written).then((extra) => {
+          console.log(`✓ 已导出到 ${path.resolve(folder)}`);
+          for (const w of [...written, ...extra]) console.log('   -', w);
+          return 0;
+        });
       } catch (e) {
         fail({
           type: 'export',
@@ -420,6 +431,79 @@ function deliver(filename, dataUrl, dir) {
   const name = filename || 'feishu-doc';
   writeDataUrl(dataUrl, path.join(folder, name));
   return { folder, written: [path.join(path.basename(folder), name)] };
+}
+
+// ==================== CDN 图片本地化 ====================
+// 小红书图片 CDN 允许非浏览器客户端直接下载（实测无 TLS 指纹拦截，且带
+// Access-Control-Allow-Origin: *），把 md 里这些外链图片下载到 images/ 并
+// 改写为相对路径。链接有时效签名，抓完立刻下载最稳。只认这几个域名族，
+// 其他网站的图片维持外链不动（很多站点会拦非浏览器请求，下载大概率失败）。
+const IMAGE_CDN_HOSTS = /(^|\.)(xhscdn\.com|xiaohongshu\.com|rednote\.com)$/;
+const IMAGE_EXT_BY_TYPE = {
+  'image/webp': '.webp',
+  'image/jpeg': '.jpg',
+  'image/png': '.png',
+  'image/gif': '.gif',
+  'image/avif': '.avif',
+};
+
+/** 下载 md 产物里命中 CDN 域名的图片；返回新增文件的相对路径列表。失败不致命，保留外链。 */
+async function localizeCdnImages(folder, written) {
+  const extra = [];
+  for (const rel of written) {
+    if (!/\.md$/i.test(rel)) continue;
+    const mdPath = path.join(outDir, rel);
+    let md;
+    try {
+      md = fs.readFileSync(mdPath, 'utf8');
+    } catch {
+      continue;
+    }
+    const links = [
+      ...new Set([...md.matchAll(/!\[[^\]]*\]\((https?:\/\/[^)\s]+)\)/g)].map((m) => m[1])),
+    ].filter((u) => {
+      try {
+        return IMAGE_CDN_HOSTS.test(new URL(u).hostname);
+      } catch {
+        return false;
+      }
+    });
+    if (links.length === 0) continue;
+
+    process.stderr.write(`… 正在下载 ${links.length} 张图片…\n`);
+    const imagesDir = path.join(folder, 'images');
+    let seq = 0;
+    let okCount = 0;
+    for (const link of links) {
+      seq++;
+      try {
+        const res = await fetch(link, { signal: AbortSignal.timeout(20000) });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const buf = Buffer.from(await res.arrayBuffer());
+        if (buf.length === 0) throw new Error('空响应');
+        const type = (res.headers.get('content-type') || '').split(';')[0].trim();
+        const name = `img-${String(seq).padStart(2, '0')}${IMAGE_EXT_BY_TYPE[type] || '.webp'}`;
+        fs.mkdirSync(imagesDir, { recursive: true });
+        fs.writeFileSync(path.join(imagesDir, name), buf);
+        md = md.split(link).join(`images/${name}`);
+        extra.push(path.join(path.basename(folder), 'images', name));
+        okCount++;
+      } catch {
+        // 单张失败：md 里保留这张的外链，继续下一张
+      }
+    }
+    if (okCount > 0) {
+      try {
+        fs.writeFileSync(mdPath, md);
+      } catch {
+        /* 改写失败不影响已交付的 md */
+      }
+    }
+    if (okCount < links.length) {
+      process.stderr.write(`… ${links.length - okCount} 张图片下载失败，md 中保留外链\n`);
+    }
+  }
+  return extra;
 }
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
