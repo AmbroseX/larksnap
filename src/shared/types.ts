@@ -113,7 +113,8 @@ export type TrackEventName =
   | 'open'
   | 'export'
   | 'webcopy'
-  | 'bridge';
+  | 'bridge'
+  | 'edit';
 
 /**
  * 一次统计事件。隐私红线：data 只允许枚举串 / 布尔 / 整数，

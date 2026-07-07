@@ -22,13 +22,16 @@ import { exportSheet } from './exporters/sheet';
 import { exportPdf } from './exporters/pdf';
 import { exportHtml } from './exporters/html';
 import { track } from './analytics';
+import { runEditJob } from './editor';
+import { waitForTabComplete } from './tab-util';
 
 const PORT = 19925;
 const PING_URL = `http://127.0.0.1:${PORT}/ping`;
 const WS_URL = `ws://127.0.0.1:${PORT}/ext`;
 // 需与 skills/larksnap-fetch/scripts/bridge/protocol.mjs 的 PROTOCOL_VERSION 一致；
 // welcome 里对不上时置 protocolMismatch 提示用户更新（不硬断，避免升级期间全瘫）。
-const PROTOCOL_VERSION = 1;
+// v2: 支持编辑任务（kind='edit'，daemon 只对 proto>=2 的扩展派发编辑任务）
+const PROTOCOL_VERSION = 2;
 const KEEPALIVE_ALARM = 'larksnap-bridge-keepalive';
 const RECONNECT_BASE = 2000;
 const RECONNECT_MAX = 5000;
@@ -180,7 +183,12 @@ interface HostMessage {
   id?: string;
   url?: string;
   format?: string;
-  opts?: { keepTab?: boolean };
+  opts?: { keepTab?: boolean; mdPaste?: boolean };
+  // 编辑任务字段（kind='edit' 时有效）
+  kind?: string;
+  op?: string;
+  contentMd?: string;
+  anchor?: { heading?: string; blockId?: string; expectSummary?: string };
 }
 
 async function onMessage(raw: string): Promise<void> {
@@ -203,6 +211,21 @@ async function onMessage(raw: string): Promise<void> {
     return;
   }
   if (msg.type === 'job' && msg.id && msg.url) {
+    if (msg.kind === 'edit') {
+      const id = msg.id;
+      await runEditJob(
+        {
+          id,
+          url: msg.url,
+          op: msg.op || '',
+          contentMd: msg.contentMd,
+          anchor: msg.anchor,
+          opts: msg.opts || {},
+        },
+        (payload) => reply(id, payload)
+      );
+      return;
+    }
     await runJob({ id: msg.id, url: msg.url, format: msg.format || 'md', opts: msg.opts || {} });
   }
 }
@@ -423,27 +446,3 @@ async function runWebpageJob(job: Job, host: string): Promise<void> {
   }
 }
 
-/** 等标签页加载完成（飞书为 SPA，complete 后再宽限一会儿让页面上下文就绪）。 */
-function waitForTabComplete(tabId: number, timeoutMs = 30000): Promise<void> {
-  return new Promise((resolve, reject) => {
-    const deadline = Date.now() + timeoutMs;
-    const tick = async () => {
-      try {
-        const tab = await chrome.tabs.get(tabId);
-        if (tab.status === 'complete') {
-          setTimeout(resolve, 1500); // SPA 渲染/cookie 就绪宽限
-          return;
-        }
-      } catch {
-        reject(new Error('标签页已关闭'));
-        return;
-      }
-      if (Date.now() > deadline) {
-        reject(new Error('打开文档超时'));
-        return;
-      }
-      setTimeout(tick, 300);
-    };
-    void tick();
-  });
-}

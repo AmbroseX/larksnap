@@ -17,6 +17,7 @@ const EVENT_WHITELIST: ReadonlySet<TrackEventName> = new Set([
   'export',
   'webcopy',
   'bridge',
+  'edit',
 ]);
 
 /** 上报一次事件。即发即弃，调用方无需 await。 */
