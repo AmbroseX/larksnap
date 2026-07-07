@@ -65,6 +65,22 @@ Then just say:
 
 Each doc lands in its own folder named after its title, with images referenced by relative paths. Requires Node.js and the extension loaded in Chrome (login state and the export engine live in the extension). See [`skills/larksnap-fetch/SKILL.md`](skills/larksnap-fetch/SKILL.md).
 
+### Download arXiv papers (PDF + HTML + Markdown)
+
+The skill ships a standalone script: paste an arXiv link or bare ID and all three formats are downloaded together — **no browser extension, no pandoc required** (the converter is bundled with the skill):
+
+> Download `https://arxiv.org/abs/2601.18226` to `./papers`
+
+Or run it directly:
+
+```bash
+node ~/.claude/skills/larksnap-fetch/scripts/arxiv.mjs 2601.18226 ./papers
+```
+
+- Accepts every form: bare ID, `arXiv:` prefix, abs / pdf / html links, and legacy IDs (`math.GT/0309136`).
+- Output lands in `./papers/2601.18226/`: `.pdf` + `.html` (opens locally without broken images) + `.md` (math restored to `$...$`, images as arxiv.org links).
+- Some papers have no HTML version — that's normal; only the PDF is saved and a note is printed.
+
 ## Development
 
 ```bash

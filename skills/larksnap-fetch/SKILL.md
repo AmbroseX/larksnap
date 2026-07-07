@@ -1,6 +1,6 @@
 ---
 name: larksnap-fetch
-description: 把一个飞书/Lark 文档链接或普通网页链接抓取并保存到本地目录（飞书文档支持 Markdown/PDF/HTML + 图片附件;普通网页只支持 Markdown,图片保留外链）。当用户在任意项目里贴出飞书文档或任意网页 URL 并希望下载/保存/导出/拉取/抓取到本地某路径时,务必使用本技能,即使用户没明说"用 larksnap"或"用扩展"。底层通过本地 daemon 桥接到已登录的 larksnap 浏览器扩展,扩展持有登录态与导出引擎;遇到未登录/未授权域名时会按退出码提示用户去浏览器登录或授权。本技能自包含(daemon 随技能分发),可从任何项目调用,不依赖 larksnap 仓库。
+description: 把一个飞书/Lark 文档链接或普通网页链接抓取并保存到本地目录（飞书文档支持 Markdown/PDF/HTML + 图片附件;普通网页只支持 Markdown,图片保留外链）。arXiv 论文（贴链接或裸 ID 均可）走独立脚本,把 PDF、HTML 和转好的 Markdown 一起下载,不依赖浏览器扩展。当用户在任意项目里贴出飞书文档或任意网页 URL 并希望下载/保存/导出/拉取/抓取到本地某路径时,务必使用本技能,即使用户没明说"用 larksnap"或"用扩展"。底层通过本地 daemon 桥接到已登录的 larksnap 浏览器扩展,扩展持有登录态与导出引擎;遇到未登录/未授权域名时会按退出码提示用户去浏览器登录或授权。本技能自包含(daemon 随技能分发),可从任何项目调用,不依赖 larksnap 仓库。
 ---
 
 # larksnap-fetch
@@ -54,6 +54,21 @@ node ~/.claude/skills/larksnap-fetch/scripts/fetch.mjs <飞书链接> <输出目
   **图片保留为外链绝对 URL**(`https://...`),不下载到本地(与飞书文档不同,没有 `images/` 目录)。
 - 未授权域名时退出码 `4`,提示用户在该网页的扩展侧边栏点「授权访问该域名」后重跑。
 - 前端渲染型页面(SPA)可能因页面加载策略抓到不完整正文,属已知局限;静态文章页效果最好。
+
+## arXiv 论文下载(PDF + HTML + Markdown 一起落地)
+
+链接或 ID 指向 arXiv 论文时,**不走 daemon/扩展**(arXiv 完全公开,不需要登录态),改用独立脚本直接下载:
+
+```bash
+node ~/.claude/skills/larksnap-fetch/scripts/arxiv.mjs <arXiv链接或ID> <输出目录> [--pdf-only|--html-only]
+```
+
+- 链接和 ID 全兼容:裸 ID(`2601.18226`)、`arXiv:` 前缀、`arxiv.org` 的 abs/pdf/html 三种链接(含 `.pdf` 后缀、`v2` 版本号)、老式 ID(`math.GT/0309136`,做目录名时斜杠替换为下划线)。
+- 产物同样独立成夹,文件夹用 ID 命名:`<输出目录>/2601.18226/2601.18226.pdf` + `.html` + `.md`。
+- HTML 里注入了 `<base>`,图片/样式解析回 arxiv.org 绝对地址,本地打开不裂图(图片本身不下载到本地)。
+- Markdown 由 HTML 就地转换,**零外部依赖**(turndown 打包在 `scripts/vendor/` 里,不需要 pandoc):公式用 LaTeXML 自带的 alttext 还原成 `$...$`/`$$...$$`,图片/引用链接为 arxiv.org 绝对地址;复杂表格以内嵌 HTML 保留。转换失败只影响 `.md`,PDF/HTML 照常落地。
+- **部分论文没有 HTML 版属正常**(arXiv 只为有 LaTeX 源且转换成功的论文提供 HTML,老论文也可能已被回补):此时只落 PDF,退出码仍为 0,stderr 有 `ℹ` 提示——**不要当成失败重试**。
+- 退出码:`0` 成功 ｜ `1` 失败 ｜ `2` 用法错;错误契约与 fetch.mjs 相同(非 0 退出时 stderr 最后一行是一行 JSON,按 `hint` 分支)。
 
 ## 错误契约(AI 按此分支,不要解析散文)
 

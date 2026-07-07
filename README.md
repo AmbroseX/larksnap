@@ -65,6 +65,22 @@ npx skills add AmbroseX/larksnap --skill larksnap-fetch -g -a claude-code
 
 产物按文档标题独立成夹，图片以相对路径内联引用。前提：本机有 Node.js，且扩展已加载进 Chrome（登录态和导出引擎都在扩展里）。详见 [`skills/larksnap-fetch/SKILL.md`](skills/larksnap-fetch/SKILL.md)。
 
+### 下载 arXiv 论文（PDF + HTML + Markdown）
+
+技能里附带独立脚本，贴 arXiv 链接或裸 ID 就把三种格式一起下载，**不需要浏览器扩展，也不需要 pandoc**（转换器已打包在技能里）：
+
+> 下载 `https://arxiv.org/abs/2601.18226` 到 `./papers`
+
+也可以直接跑命令：
+
+```bash
+node ~/.claude/skills/larksnap-fetch/scripts/arxiv.mjs 2601.18226 ./papers
+```
+
+- 链接和 ID 全兼容：裸 ID、`arXiv:` 前缀、abs / pdf / html 三种链接、老式 ID（`math.GT/0309136`）。
+- 产物落在 `./papers/2601.18226/` 下：`.pdf` + `.html`（本地打开不裂图）+ `.md`（公式还原为 `$...$`，图片为 arxiv.org 外链）。
+- 部分论文没有 HTML 版属正常，此时只落 PDF 并在输出里提示。
+
 ## 开发
 
 ```bash
