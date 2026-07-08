@@ -108,6 +108,14 @@ npm run typecheck  # 仅类型检查
 - **权限最小化**：私有化域名按需运行时授权，不预先索取全站权限；诊断包已剔除 PII 字段。
 - 本工具仅供合法、获授权的文档导出与个人备份用途，请遵守所在组织的数据管理策略与飞书 / Lark 服务条款，滥用后果由使用者自行承担。
 
+## 交流群
+
+有问题、建议或想反馈 bug，欢迎扫码进群交流：
+
+<p align="center">
+  <img alt="交流群" src="docs/images/交流群.png" width="300">
+</p>
+
 ## 致谢
 
 独立实现，设计中参考了这些开源项目的思路：[feishu2md](https://github.com/Wsine/feishu2md)、[xiaoyaosearch-feishu-export-md](https://github.com/dtsola/xiaoyaosearch-feishu-export-md)、[feishu-doc-helper](https://github.com/sancijun/feishu-doc-helper)、[feishu-backup](https://github.com/dicarne/feishu-backup)、[feishu-doc-export](https://github.com/eternalfree/feishu-doc-export)、[OpenCLI](https://github.com/jackwener/OpenCLI)。
