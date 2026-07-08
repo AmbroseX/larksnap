@@ -20,7 +20,7 @@ import { track } from './analytics';
  *   后台开文档标签页 → 读块树（复用 client_vars 读管线）→ 定位目标 →
  *   主世界注入（合成 paste 降级链）→ 等保存 → 回读校验 → 回结果。
  *
- * list-blocks 只走读管线不开编辑流程；probe 是开发用的 DOM 探测（实验记录用）。
+ * list-blocks / find-blocks 只走读管线不开编辑流程；probe 是开发用的 DOM 探测（实验记录用）。
  */
 
 export interface EditJob {
@@ -28,7 +28,16 @@ export interface EditJob {
   url: string;
   op: string;
   contentMd?: string;
-  anchor?: { heading?: string; blockId?: string; expectSummary?: string };
+  anchor?: {
+    heading?: string;
+    blockId?: string;
+    expectSummary?: string;
+    // find-blocks 的查询参数搭 anchor 便车（daemon 只透传 kind/op/contentMd/anchor）
+    query?: string;
+    regex?: boolean;
+    typeFilter?: string;
+    limit?: number;
+  };
   opts: { keepTab?: boolean; mdPaste?: boolean };
 }
 
@@ -103,6 +112,12 @@ export async function runEditJob(job: EditJob, reply: Reply): Promise<void> {
     if (job.op === 'list-blocks') {
       void track({ name: 'edit', url: '/edit/list-blocks', data: { ok: true } });
       reply({ type: 'result', blocks: flatten(tree) });
+      return;
+    }
+
+    if (job.op === 'find-blocks') {
+      void track({ name: 'edit', url: '/edit/find-blocks', data: { ok: true } });
+      reply({ type: 'result', ...findBlocks(tree, job.anchor ?? {}) });
       return;
     }
 
@@ -270,6 +285,81 @@ function flatten(tree: BlockTree): FlatBlock[] {
   };
   for (const id of tree.order) walk(id, 0);
   return out;
+}
+
+// ==================== 块检索（find-blocks） ====================
+
+const FIND_LIMIT_DEFAULT = 20;
+const SNIPPET_MARGIN = 40;
+
+/** 命中范围（原文偏移，end 为开区间） */
+interface Hit {
+  start: number;
+  end: number;
+}
+
+/**
+ * 在块的完整纯文本上检索（长文档定位用，只读）。
+ * 默认「去空白 + 忽略大小写」子串匹配；regex 走 iu 正则原文匹配。
+ * 纯文本为空的块（图片、分割线等）永远不命中。
+ * 命中超过 limit 时只收集前 limit 条，total 报告真实命中数。
+ */
+function findBlocks(
+  tree: BlockTree,
+  anchor: NonNullable<EditJob['anchor']>
+): { total: number; shown: number; blocks: (FlatBlock & { snippet: string })[] } {
+  const limit =
+    Number.isInteger(anchor.limit) && (anchor.limit as number) > 0
+      ? (anchor.limit as number)
+      : FIND_LIMIT_DEFAULT;
+  const re = anchor.regex ? new RegExp(anchor.query ?? '', 'iu') : null;
+  const needle = normalize(anchor.query ?? '').toLowerCase();
+  let total = 0;
+  const blocks: (FlatBlock & { snippet: string })[] = [];
+  for (const f of flatten(tree)) {
+    if (anchor.typeFilter && !f.type.startsWith(anchor.typeFilter)) continue;
+    const text = plainText(tree.map[f.id].text);
+    if (!text) continue;
+    const hit = re ? matchRegex(text, re) : matchPlain(text, needle);
+    if (!hit) continue;
+    total++;
+    if (blocks.length < limit) blocks.push({ ...f, snippet: snippetOf(text, hit) });
+  }
+  return { total, shown: blocks.length, blocks };
+}
+
+function matchRegex(text: string, re: RegExp): Hit | null {
+  const m = re.exec(text);
+  return m ? { start: m.index, end: m.index + m[0].length } : null;
+}
+
+/** 去空白子串匹配；命中的起点和终点都要映射回原文偏移（命中范围在原文里可能夹着空白） */
+function matchPlain(text: string, needle: string): Hit | null {
+  if (!needle) return null;
+  const chars: string[] = [];
+  const origIndex: number[] = []; // 归一化位置 → 原文位置
+  for (let i = 0; i < text.length; i++) {
+    if (/\s/.test(text[i])) continue;
+    chars.push(text[i].toLowerCase());
+    origIndex.push(i);
+  }
+  const at = chars.join('').indexOf(needle);
+  if (at < 0) return null;
+  return { start: origIndex[at], end: origIndex[at + needle.length - 1] + 1 };
+}
+
+/** 命中处前后各 SNIPPET_MARGIN 字的上下文，命中词用【】标出，截断处补 … */
+function snippetOf(text: string, hit: Hit): string {
+  const clean = (s: string) => s.replace(/\s+/g, ' ');
+  const from = Math.max(0, hit.start - SNIPPET_MARGIN);
+  const to = Math.min(text.length, hit.end + SNIPPET_MARGIN);
+  return (
+    (from > 0 ? '…' : '') +
+    clean(text.slice(from, hit.start)) +
+    `【${clean(text.slice(hit.start, hit.end))}】` +
+    clean(text.slice(hit.end, to)) +
+    (to < text.length ? '…' : '')
+  );
 }
 
 type Target = {

@@ -8,6 +8,8 @@
 //   node edit.mjs <链接> append <md文件>
 //   node edit.mjs <链接> insert-after "<标题文本>" <md文件>
 //   node edit.mjs <链接> list-blocks                         # 只读，块清单 JSON 打到 stdout
+//   node edit.mjs <链接> find-blocks "<关键词>" [--regex] [--type <类型前缀>] [--limit N]
+//                                                            # 只读，按内容检索块（长文档定位用）
 //   node edit.mjs <链接> replace-block <块ID> <md文件> --expect "<内容摘要>"
 //   node edit.mjs <链接> delete-block <块ID> --expect "<内容摘要>"
 //   node edit.mjs <链接> insert-after-block <块ID> <md文件>
@@ -66,6 +68,7 @@ const USAGE_HINT = [
   '用法: edit.mjs <链接> append <md文件>',
   '     edit.mjs <链接> insert-after "<标题文本>" <md文件>',
   '     edit.mjs <链接> list-blocks',
+  '     edit.mjs <链接> find-blocks "<关键词>" [--regex] [--type <类型前缀>] [--limit N]',
   '     edit.mjs <链接> replace-block <块ID> <md文件> --expect "<内容摘要>"',
   '     edit.mjs <链接> delete-block <块ID> --expect "<内容摘要>"',
   '     edit.mjs <链接> insert-after-block <块ID> <md文件>',
@@ -76,11 +79,11 @@ function usage(message) {
   fail({ type: 'usage', subtype: 'bad_args', message, hint: USAGE_HINT });
 }
 
-const FLAGS_WITH_VALUE = new Set(['--profile', '--expect', '--expect-first']);
+const FLAGS_WITH_VALUE = new Set(['--profile', '--expect', '--expect-first', '--type', '--limit']);
 // 默认走纯文本 Markdown 口味粘贴（飞书自己解析转块：表格转原生简单表格而非
 // 异步提交的内嵌电子表格，代码块注释行也不会被误判成标题）。
 // --html-paste：退回 HTML 口味粘贴（万一某租户不支持 md 粘贴解析时用）。
-const FLAGS_BOOL = new Set(['--md-paste', '--html-paste']);
+const FLAGS_BOOL = new Set(['--md-paste', '--html-paste', '--regex']);
 const flags = {};
 const positionals = [];
 for (let i = 0; i < argv.length; i++) {
@@ -116,6 +119,35 @@ switch (op) {
   case 'list-blocks':
   case 'probe': // 隐藏命令（开发/实验用）：收集编辑器 DOM 形态，JSON 打到 stdout
     break;
+  case 'find-blocks': {
+    // 只读检索：在块的完整纯文本上匹配（解决 list-blocks 摘要 80 字盲区 + 长文档全量输出太贵）。
+    // 要搜以 -- 开头的内容，用 --regex 加转义绕过参数解析。
+    const query = positionals[2];
+    if (!query) usage('find-blocks 需要 "<关键词>"。');
+    if (flags['--regex']) {
+      // 预检旗标必须与扩展端执行完全一致（iu）：u 旗标下未转义的 { 、孤立的 \p 等都是语法错
+      try {
+        new RegExp(query, 'iu');
+      } catch (e) {
+        usage(`正则语法错误: ${e instanceof Error ? e.message : String(e)}`);
+      }
+    } else if (!query.replace(/\s+/g, '')) {
+      // 纯空白关键词归一化后是空串，空串子串匹配会命中所有块
+      usage('find-blocks 的关键词去掉空白后不能为空。');
+    }
+    let limit;
+    if (flags['--limit'] !== undefined) {
+      limit = Number(flags['--limit']);
+      if (!Number.isInteger(limit) || limit <= 0) usage('--limit 必须是正整数。');
+    }
+    anchor = {
+      query,
+      regex: flags['--regex'] || undefined,
+      typeFilter: flags['--type'] || undefined,
+      limit,
+    };
+    break;
+  }
   case 'replace-block':
     if (!positionals[2] || !positionals[3]) usage('replace-block 需要 <块ID> 和 <md文件>。');
     if (!flags['--expect']) usage('replace-block 必须带 --expect "<内容摘要>"（取自 list-blocks 输出的 summary，防止改错块）。');
@@ -378,6 +410,17 @@ function handleLine(msg) {
       if (op === 'list-blocks') {
         // 块清单 JSON 打到 stdout（供 CC 解析定位目标块）
         console.log(JSON.stringify({ ok: true, blocks: msg.blocks || [] }, null, 2));
+        return 0;
+      }
+      if (op === 'find-blocks') {
+        // 命中块 JSON 打到 stdout；total > shown 说明被 --limit 截断，还有没展示的命中
+        console.log(
+          JSON.stringify(
+            { ok: true, total: msg.total ?? 0, shown: msg.shown ?? 0, blocks: msg.blocks || [] },
+            null,
+            2
+          )
+        );
         return 0;
       }
       if (op === 'probe') {

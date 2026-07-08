@@ -188,7 +188,16 @@ interface HostMessage {
   kind?: string;
   op?: string;
   contentMd?: string;
-  anchor?: { heading?: string; blockId?: string; expectSummary?: string };
+  anchor?: {
+    heading?: string;
+    blockId?: string;
+    expectSummary?: string;
+    // find-blocks 的查询参数搭 anchor 便车（daemon 只透传 kind/op/contentMd/anchor）
+    query?: string;
+    regex?: boolean;
+    typeFilter?: string;
+    limit?: number;
+  };
 }
 
 async function onMessage(raw: string): Promise<void> {
