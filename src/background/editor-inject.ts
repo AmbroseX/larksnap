@@ -21,8 +21,9 @@ export interface EditorStepPayload {
    *  locate=算出目标点击坐标（可信鼠标点击才能驱动飞书的选区模型）；
    *  verify=轮询内容指纹确认生效 */
   action: 'synthetic' | 'stage-copy' | 'locate' | 'verify' | 'settle';
-  /** append=文末追加；after=目标块后插入；replace=替换目标块；delete=删除目标块 */
-  mode: 'append' | 'after' | 'replace' | 'delete';
+  /** append=文末追加；after=目标块后插入；replace=替换目标块；delete=删除目标块；
+   *  replace-all=全选正文整体替换（blockId 传旧首块，用于定位点击与回读判据） */
+  mode: 'append' | 'after' | 'replace' | 'delete' | 'replace-all';
   /** 目标块 ID（append 时是最后一个顶层块，用于把光标放到文末） */
   blockId?: string;
   /** 要注入的 HTML（marked 从 Markdown 转来；delete 时为空） */
@@ -47,6 +48,14 @@ export interface EditorStepPayload {
    *  Markdown 粘贴解析自己转块——HTML 表格会被转成异步提交的内嵌电子表格
    *  （后台页里数据提交不稳），md 文本表格则转成原生简单表格 */
   plainOnly?: boolean;
+  /** 锚点块是列表项（bullet/ordered/todo）：回车产生的是新列表项，md 语法在
+   *  列表上下文里不解析（### 行被吞，公有云实测）。SW 侧看到此标记会多按一次
+   *  回车退出列表再粘贴。字段由 SW 填、SW 用，挂在 payload 上只是搭便车 */
+  escapeList?: boolean;
+  /** replace 专用（SW 填、SW 用）：目标块前面那一块的 ID 与列表标记。
+   *  replace 走"先删后插"，删掉目标块后以前一块为锚点粘贴 */
+  prevBlockId?: string;
+  prevIsList?: boolean;
 }
 
 export interface EditorStepResult {
@@ -149,10 +158,12 @@ export async function editorStepInPage(p: EditorStepPayload): Promise<EditorStep
   switch (p.action) {
     // ============ 第一级：合成 paste 快速尝试（isTrusted=false，多数部署会忽略） ============
     case 'synthetic': {
+      // 删除/全文替换没有合成通道（合成按键与合成 SelectAll 同样不可信），直接交给 CDP
+      if (p.mode === 'delete' || p.mode === 'replace-all') {
+        return { ok: false, reason: 'synthetic-rejected' };
+      }
       const err = placeSelection();
       if (err) return err;
-      // 删除没有合成通道（合成按键同样不可信），直接交给 CDP
-      if (p.mode === 'delete') return { ok: false, reason: 'synthetic-rejected' };
       const before = editorText();
       const dt = new DataTransfer();
       dt.setData('text/html', p.html ?? '');
@@ -176,18 +187,30 @@ export async function editorStepInPage(p: EditorStepPayload): Promise<EditorStep
       return { ok: false, reason: 'synthetic-rejected' };
     }
 
-    // ============ CDP 第 1 步：屏外临时节点装 HTML 并选中，等 SW 发可信 Copy ============
+    // ============ CDP 第 1 步：屏外临时节点装内容并选中，等 SW 发可信 Copy ============
     case 'stage-copy': {
       document.getElementById(STAGE_ID)?.remove();
+      if (p.plainOnly) {
+        // 纯文本模式暂存台必须用 textarea：从 textarea 复制，系统剪贴板只会有
+        // text/plain 一种口味。之前用 contenteditable div，execCommand('copy')
+        // 兜底路径会连带产生 text/html 口味，飞书一看到 html 就走 HTML 粘贴、
+        // 跳过 Markdown 解析，整篇落成字面文本（R1 实测，偶发取决于走哪条复制路径）
+        const ta = document.createElement('textarea');
+        ta.id = STAGE_ID;
+        ta.value = p.text ?? '';
+        ta.style.cssText = 'position:fixed;left:-99999px;top:0;width:600px;height:400px;opacity:0;';
+        document.body.appendChild(ta);
+        ta.focus();
+        ta.select();
+        return { ok: true };
+      }
       const div = document.createElement('div');
       div.id = STAGE_ID;
       div.contentEditable = 'true';
-      // 屏外但可选中（display:none 的内容选不了也复制不了）；pre-wrap 保证纯文本
-      // 模式下 innerText 保留换行（markdown 结构靠换行）
+      // 屏外但可选中（display:none 的内容选不了也复制不了）
       div.style.cssText =
         'position:fixed;left:-99999px;top:0;width:600px;opacity:0;white-space:pre-wrap;';
-      if (p.plainOnly) div.textContent = p.text ?? '';
-      else div.innerHTML = p.html ?? '';
+      div.innerHTML = p.html ?? '';
       document.body.appendChild(div);
       const sel = window.getSelection();
       if (!sel) return { ok: false, reason: 'stage-failed', message: '无法获取选区' };
@@ -214,11 +237,29 @@ export async function editorStepInPage(p: EditorStepPayload): Promise<EditorStep
         };
       }
       let node = p.blockId ? findBlockNode(p.blockId) : null;
+      if (!node && p.blockId && p.mode !== 'append') {
+        // 长文档虚拟化渲染：块不在视口附近就不在 DOM 里，滚动扫描全文找它
+        const scroller =
+          (function findScroller(el: HTMLElement | null): HTMLElement | null {
+            for (let cur = el; cur; cur = cur.parentElement) {
+              if (cur.scrollHeight > cur.clientHeight + 50) return cur;
+            }
+            return null;
+          })(root) || (document.scrollingElement as HTMLElement | null);
+        if (scroller) {
+          const stepPx = Math.max(300, window.innerHeight * 0.8);
+          for (let pos = 0; pos <= scroller.scrollHeight && !node; pos += stepPx) {
+            scroller.scrollTop = pos;
+            await sleep(250); // 等虚拟化渲染补块
+            node = findBlockNode(p.blockId);
+          }
+        }
+      }
       if (!node && p.mode !== 'append') {
         return {
           ok: false,
           reason: 'block-node-not-found',
-          message: `页面 DOM 里找不到块 ${p.blockId}（data-block-id 类属性未命中）`,
+          message: `页面 DOM 里找不到块 ${p.blockId}（含全文滚动扫描，data-block-id 类属性未命中）`,
         };
       }
       if (!node && p.mode === 'append') {
@@ -259,9 +300,25 @@ export async function editorStepInPage(p: EditorStepPayload): Promise<EditorStep
           : node.getBoundingClientRect();
         return { ...base, x: Math.max(r.left + 1, r.right - 2), y: r.top + r.height / 2 };
       }
-      // replace / delete：点块中心（之后 Esc 进入块选中态）
-      const r = node.getBoundingClientRect();
-      return { ...base, x: r.left + r.width / 2, y: r.top + r.height / 2 };
+      // replace / delete / replace-all：点块内第一行文本矩形的中点，不点块盒子的
+      // 几何中心——公有云上最后一个列表项的盒子比文本行高（往下多占一截），点
+      // 几何中心会落到下一个块上，Esc+Backspace 连环误删邻居块（实测三轮追凶）
+      {
+        const range = document.createRange();
+        range.selectNodeContents(node);
+        const rects = Array.from(range.getClientRects()).filter(
+          (q) => q.width > 1 && q.height > 1
+        );
+        if (rects.length) {
+          const top = rects.reduce((a, b) =>
+            b.top < a.top || (b.top === a.top && b.left < a.left) ? b : a
+          );
+          return { ...base, x: top.left + top.width / 2, y: top.top + top.height / 2 };
+        }
+        // 块内没有文本矩形（图片等）：点盒子顶部往下一点，避开盒子下缘
+        const r = node.getBoundingClientRect();
+        return { ...base, x: r.left + r.width / 2, y: r.top + Math.min(14, r.height / 2) };
+      }
     }
 
     // ============ CDP 第 3 步：轮询内容指纹，确认可信输入真的进了编辑器 ============
@@ -274,7 +331,9 @@ export async function editorStepInPage(p: EditorStepPayload): Promise<EditorStep
         // 插入→首行或末行指纹出现即命中（长文档飞书虚拟化渲染，粘贴后视口在
         // 尾部，首行可能不在 DOM 里）；两个指纹注入前都已存在→退化为长度变长
         let hit: boolean;
-        if (p.mode === 'delete' || p.mode === 'replace') {
+        if (p.mode === 'delete' || p.mode === 'replace' || p.mode === 'replace-all') {
+          // replace-all 的 blockId 是旧首块：整体替换后飞书会给新内容发新块 ID，
+          // 旧首块节点消失即说明"真替换了"而不是"追加在后面"（服务端回读再把关一次）
           hit = !findBlockNode(p.blockId ?? '');
         } else {
           const now = editorText();

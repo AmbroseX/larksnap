@@ -11,6 +11,7 @@
 //   node edit.mjs <链接> replace-block <块ID> <md文件> --expect "<内容摘要>"
 //   node edit.mjs <链接> delete-block <块ID> --expect "<内容摘要>"
 //   node edit.mjs <链接> insert-after-block <块ID> <md文件>
+//   node edit.mjs <链接> replace-all <md文件> --expect-first "<首块内容摘要>"   # 危险：整篇正文替换
 // 通用旗标: --profile <code> 指定浏览器 profile（多 profile 时路由用）
 //
 // 退出码: 0 成功 | 1 失败 | 2 用法错 | 3 需登录 | 4 需授权域名 | 5 桥接未就绪 | 6 需编辑权限
@@ -59,7 +60,7 @@ const EDIT_ERROR_KINDS = {
 // ==================== 参数解析 ====================
 
 const argv = process.argv.slice(2);
-const FLAGS_WITH_VALUE = new Set(['--profile', '--expect']);
+const FLAGS_WITH_VALUE = new Set(['--profile', '--expect', '--expect-first']);
 // 默认走纯文本 Markdown 口味粘贴（飞书自己解析转块：表格转原生简单表格而非
 // 异步提交的内嵌电子表格，代码块注释行也不会被误判成标题）。
 // --html-paste：退回 HTML 口味粘贴（万一某租户不支持 md 粘贴解析时用）。
@@ -86,6 +87,7 @@ const USAGE_HINT = [
   '     edit.mjs <链接> replace-block <块ID> <md文件> --expect "<内容摘要>"',
   '     edit.mjs <链接> delete-block <块ID> --expect "<内容摘要>"',
   '     edit.mjs <链接> insert-after-block <块ID> <md文件>',
+  '     edit.mjs <链接> replace-all <md文件> --expect-first "<首块内容摘要>"',
 ].join('\n  ');
 
 function usage(message) {
@@ -127,6 +129,15 @@ switch (op) {
     if (!positionals[2] || !positionals[3]) usage('insert-after-block 需要 <块ID> 和 <md文件>。');
     anchor = { blockId: positionals[2] };
     mdFile = positionals[3];
+    break;
+  case 'replace-all':
+    // 整篇正文替换（最危险的操作）：--expect-first 必带，扩展执行前比对当前文档
+    // 首块内容，对不上报 block_changed，防止把别人刚改过的文档洗掉
+    mdFile = positionals[2];
+    if (!mdFile) usage('replace-all 需要 <md文件>。');
+    if (!flags['--expect-first'])
+      usage('replace-all 必须带 --expect-first "<首块内容摘要>"（取自 list-blocks 输出第一个块的 summary，防止洗错文档）。');
+    anchor = { expectSummary: flags['--expect-first'] };
     break;
   default:
     usage(`不认识的操作「${op}」。`);

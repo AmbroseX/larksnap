@@ -104,6 +104,16 @@ export function buildBlockTree(
   let order: string[] = [];
   if (rootId && map[rootId].children.length) {
     order = map[rootId].children.filter((id) => map[id]);
+    // 保险：长文档翻页时根块 children 可能不全，把父块是根块、
+    // 却没进 order 的顶层块按 sequence 顺序补到末尾（渲染有 seen 去重，补错不重复输出）
+    const inOrder = new Set(order);
+    const candidates = sequence.length ? sequence : Object.keys(map);
+    for (const id of candidates) {
+      if (!inOrder.has(id) && map[id] && map[id].parentId === rootId) {
+        inOrder.add(id);
+        order.push(id);
+      }
+    }
   } else if (sequence.length) {
     // 兜底：用 block_sequence 顶层（排除根自身）
     order = sequence.filter((id) => map[id] && id !== rootId);

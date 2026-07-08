@@ -59,6 +59,7 @@ node ~/.claude/skills/larksnap-fetch/scripts/edit.mjs <链接> list-blocks
 node ~/.claude/skills/larksnap-fetch/scripts/edit.mjs <链接> replace-block <块ID> <md文件> --expect "<内容摘要>"
 node ~/.claude/skills/larksnap-fetch/scripts/edit.mjs <链接> delete-block <块ID> --expect "<内容摘要>"
 node ~/.claude/skills/larksnap-fetch/scripts/edit.mjs <链接> insert-after-block <块ID> <md文件>
+node ~/.claude/skills/larksnap-fetch/scripts/edit.mjs <链接> replace-all <md文件> --expect-first "<首块内容摘要>"
 ```
 
 - **写入内容一律先写进本地 md 文件**再把文件路径传给命令(不走命令行参数,避免转义和长度问题);上限 2MB。
@@ -70,6 +71,10 @@ node ~/.claude/skills/larksnap-fetch/scripts/edit.mjs <链接> insert-after-bloc
   `parentId`/`depth`/`childCount` 确认不会误删一整节。
 - `insert-after` 按标题文本**精确匹配**:找不到报 `anchor_not_found`,多于一个报 `anchor_ambiguous`
   (此时改用 `insert-after-block` 以块 ID 定位)。
+- **`replace-all` 是最危险的操作(整篇正文替换,文档标题保留)**,流程必须是:
+  ① 先 `fetch.mjs` 把原文档导出到本地做备份;② `list-blocks` 取输出**第一个块**的 `summary`;
+  ③ 原样作为 `--expect-first` 传入。扩展执行前比对当前文档首块,对不上报 `block_changed`
+  (说明文档已被改过,重新走 ①②)。没有备份就不要执行 replace-all。
 - 写入成功的判定是**回读校验**:编辑后重新导出全文,确认新内容已落地才回成功。报
   `save_unconfirmed` 时内容可能已进文档,**不要盲目重跑**(可能写两次),让用户打开文档人工确认。
 - **编辑成功后想继续做块级操作,先重新 `list-blocks`**。飞书的块按 ID 寻址,没被动过的块

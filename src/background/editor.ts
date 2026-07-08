@@ -66,7 +66,28 @@ export async function runEditJob(job: EditJob, reply: Reply): Promise<void> {
     tabId = tab.id;
     if (tabId == null) throw new Error('无法打开标签页');
     await waitForTabComplete(tabId);
-    await chrome.scripting.executeScript({ target: { tabId }, files: ['content.js'] });
+    // 公有云文档页有登录重定向链，complete 可能落在中间页/错误页上，此时注入
+    // content.js 会报 "Could not load file"（公有云验收实测）。重试三次，仍不行
+    // 就把标签页状态带进错误信息方便定位
+    let injectErr: unknown;
+    let injected = false;
+    for (let i = 0; i < 3 && !injected; i++) {
+      try {
+        await chrome.scripting.executeScript({ target: { tabId }, files: ['content.js'] });
+        injected = true;
+      } catch (e) {
+        injectErr = e;
+        await new Promise((r) => setTimeout(r, 1500));
+        await waitForTabComplete(tabId);
+      }
+    }
+    if (!injected) {
+      const t = await chrome.tabs.get(tabId).catch(() => null);
+      throw new Error(
+        `内容脚本注入失败: ${injectErr instanceof Error ? injectErr.message : String(injectErr)}` +
+          `（tab url=${t?.url ?? '?'}, status=${t?.status ?? '?'}, discarded=${String(t?.discarded ?? false)}）`
+      );
+    }
     setContentTab(tabId);
 
     // 开发用探测：只收集编辑器 DOM 形态，不读内容不写入
@@ -96,6 +117,9 @@ export async function runEditJob(job: EditJob, reply: Reply): Promise<void> {
     const base: Omit<EditorStepPayload, 'action'> = {
       mode: target.mode,
       blockId: target.blockId,
+      escapeList: target.escapeList,
+      prevBlockId: target.prevBlockId,
+      prevIsList: target.prevIsList,
       html: job.contentMd ? String(marked.parse(job.contentMd)) : '',
       text: job.contentMd ?? '',
       // 指纹用剥掉 Markdown 语法的首行 + 末行——页面 innerText 是渲染结果，带语法的
@@ -135,10 +159,17 @@ export async function runEditJob(job: EditJob, reply: Reply): Promise<void> {
     });
     // 给协同引擎一点提交时间再回读（页面上已确认内容出现，这里等的是服务端落库）
     await new Promise((res) => setTimeout(res, 2000));
-    // 回读一次不中就再等 3s 重试一次（服务端落库可能比页面确认慢）
+    // 回读一次不中就再等 3s 重试一次（服务端落库可能比页面确认慢）；
+    // 还不中再按内容大小加一轮（大内容几百个块的落库实测能超过 5 秒）
     let verified = await verify(info, job, target);
     if (!verified) {
       await new Promise((res) => setTimeout(res, 3000));
+      verified = await verify(info, job, target);
+    }
+    if (!verified && (job.contentMd?.length ?? 0) > 2000) {
+      await new Promise((res) =>
+        setTimeout(res, Math.min(15000, 3000 + (job.contentMd?.length ?? 0)))
+      );
       verified = await verify(info, job, target);
     }
     void track({ name: 'edit', url: '/edit/task', data: { ok: verified, op: job.op, method: r.method ?? '' } });
@@ -236,13 +267,53 @@ function flatten(tree: BlockTree): FlatBlock[] {
   return out;
 }
 
-type Target = { mode: EditorStepPayload['mode']; blockId?: string };
+type Target = {
+  mode: EditorStepPayload['mode'];
+  blockId?: string;
+  escapeList?: boolean;
+  prevBlockId?: string;
+  prevIsList?: boolean;
+};
+
+/** 锚点块是列表项吗（回车会续列表、md 语法不解析，粘贴前要多回车一次退出列表） */
+function isListItem(type: string): boolean {
+  return /bullet|ordered|todo|task/i.test(type);
+}
 
 function resolveTarget(job: EditJob, tree: BlockTree): Target | { error: Record<string, unknown> } {
   switch (job.op) {
-    case 'append':
+    case 'append': {
       // 光标锚点用最后一个顶层块；文档为空时退回编辑器根
-      return { mode: 'append', blockId: tree.order[tree.order.length - 1] };
+      const lastId = tree.order[tree.order.length - 1];
+      return {
+        mode: 'append',
+        blockId: lastId,
+        escapeList: lastId ? isListItem(tree.map[lastId]?.type ?? '') : false,
+      };
+    }
+
+    case 'replace-all': {
+      // 全文替换是毁灭性操作：执行前必须比对当前首块内容（--expect-first），
+      // 对不上说明文档已不是调用方看到的那份，宁可失败不可洗错文档
+      const firstId = tree.order[0];
+      const first = firstId ? tree.map[firstId] : undefined;
+      if (!first) {
+        // 正文没有任何块（空文档）：全文替换退化为追加
+        return { mode: 'append', blockId: undefined };
+      }
+      const now = summaryOf(first);
+      const expect = job.anchor?.expectSummary ?? '';
+      if (normalize(now) !== normalize(expect)) {
+        return {
+          error: {
+            type: 'error',
+            subtype: 'block_changed',
+            message: `文档首块内容与预期不一致（当前「${now}」/ 预期「${expect}」），文档可能被修改过，已中止全文替换`,
+          },
+        };
+      }
+      return { mode: 'replace-all', blockId: firstId };
+    }
 
     case 'insert-after': {
       const want = normalize(job.anchor?.heading ?? '');
@@ -300,7 +371,20 @@ function resolveTarget(job: EditJob, tree: BlockTree): Target | { error: Record<
       }
       const mode =
         job.op === 'insert-after-block' ? 'after' : job.op === 'replace-block' ? 'replace' : 'delete';
-      return { mode, blockId: id };
+      // replace 走"先删后插"，需要目标块前面那一块当粘贴锚点（按文档顺序展开找）
+      if (mode === 'replace') {
+        const flat = flatten(tree);
+        const idx = flat.findIndex((f) => f.id === id);
+        const prev = idx > 0 ? flat[idx - 1] : undefined;
+        return {
+          mode,
+          blockId: id,
+          escapeList: isListItem(b.type),
+          prevBlockId: prev?.id,
+          prevIsList: prev ? isListItem(prev.type) : false,
+        };
+      }
+      return { mode, blockId: id, escapeList: isListItem(b.type) };
     }
 
     default:
@@ -339,8 +423,15 @@ async function verify(
   try {
     const { tree } = await readTree(info);
     if (target.mode === 'delete') return !tree.map[target.blockId ?? ''];
-    // 替换会换块 ID（实测）：旧块必须已消失，且新内容出现（下方包含性检查）
-    if (target.mode === 'replace' && tree.map[target.blockId ?? '']) return false;
+    // 替换会换块 ID（实测）：旧块必须已消失，且新内容出现（下方包含性检查）。
+    // replace-all 同理用"旧首块 ID 消失"判"真替换了"而不是"追加在后面"——
+    // 不用"旧首块摘要消失"：新内容常常保留原来的首行标题，摘要判据会假失败
+    if (
+      (target.mode === 'replace' || target.mode === 'replace-all') &&
+      tree.map[target.blockId ?? '']
+    ) {
+      return false;
+    }
     const lines = meaningfulLines(job.contentMd ?? '');
     if (!lines.length) return true; // 没有可比对的文本（如纯分隔线）→ 视为通过
     const docText = normalize(
@@ -402,6 +493,9 @@ async function cdpInject(
     code: string;
     vk: number;
     commands?: string[];
+    /** CDP 修饰键位掩码：Alt=1, Ctrl=2, Meta/Cmd=4, Shift=8。带修饰键的按键
+     *  会以真实快捷键的形态进页面，由飞书自己的快捷键处理器接管 */
+    modifiers?: number;
   }): Promise<void> => {
     await chrome.debugger.sendCommand(dbg, 'Input.dispatchKeyEvent', {
       type: 'keyDown',
@@ -409,6 +503,7 @@ async function cdpInject(
       code: spec.code,
       windowsVirtualKeyCode: spec.vk,
       nativeVirtualKeyCode: spec.vk,
+      ...(spec.modifiers ? { modifiers: spec.modifiers } : {}),
       ...(spec.commands ? { commands: spec.commands } : {}),
     });
     await chrome.debugger.sendCommand(dbg, 'Input.dispatchKeyEvent', {
@@ -417,16 +512,43 @@ async function cdpInject(
       code: spec.code,
       windowsVirtualKeyCode: spec.vk,
       nativeVirtualKeyCode: spec.vk,
+      ...(spec.modifiers ? { modifiers: spec.modifiers } : {}),
     });
   };
 
   await chrome.debugger.attach(dbg, '1.3');
+  // 协同同步监听：飞书的编辑操作走 WebSocket 推给服务端。后台标签页定时器被
+  // Chrome 节流，推送很慢——标签页关早了没推完的操作全部丢失（实测 20KB 只落
+  // 一部分、小追加"成功后消失"）。监听出站 WS 帧，静默满 3 秒才算推完。
+  let lastWsSent = Date.now();
+  const onWs = (source: chrome.debugger.Debuggee, method: string): void => {
+    if (source.tabId === tabId && method === 'Network.webSocketFrameSent') {
+      lastWsSent = Date.now();
+    }
+  };
+  chrome.debugger.onEvent.addListener(onWs);
+  const waitWsQuiet = async (capMs: number): Promise<void> => {
+    const t0 = Date.now();
+    while (Date.now() - t0 < capMs) {
+      if (Date.now() - lastWsSent >= 3000) return;
+      await new Promise((res) => setTimeout(res, 300));
+    }
+  };
   try {
     // 后台标签页没有页面焦点，Blink 编辑命令（Copy/Paste）对非激活页面不执行，
     // 用 CDP 的焦点仿真让页面自认为处于前台
     await chrome.debugger.sendCommand(dbg, 'Emulation.setFocusEmulationEnabled', {
       enabled: true,
     });
+    await chrome.debugger.sendCommand(dbg, 'Network.enable');
+    try {
+      // 把页面标记为活跃，解除后台定时器节流（协同推送依赖定时器批量发送）
+      await chrome.debugger.sendCommand(dbg, 'Page.setWebLifecycleState', {
+        state: 'active',
+      });
+    } catch {
+      /* 部分 Chrome 版本不支持，忽略 */
+    }
     // 可信鼠标点击：让飞书自己把光标放到目标位置
     const click = async (x: number, y: number): Promise<void> => {
       for (const type of ['mousePressed', 'mouseReleased'] as const) {
@@ -441,21 +563,68 @@ async function cdpInject(
     };
     const sleep = (ms: number) => new Promise<void>((res) => setTimeout(res, ms));
 
-    // ---- 删除：点击 → Esc 块选中 → Backspace ----
-    if (base.mode === 'delete') {
-      const tg = (await step({ action: 'locate' })) as EditorStepResult;
+    // ---- 定位（带坐标稳定性检查）：渐进转块/自动滚动会让布局漂移，坐标一算完
+    // 就过期，点击落到邻居块上（公有云实测：Backspace 误删了刚贴进去的标题块）。
+    // 连续两次定位坐标一致（±2px）才返回 ----
+    const stableLocate = async (
+      extra: Partial<EditorStepPayload>
+    ): Promise<EditorStepResult> => {
+      let tg = (await step({ ...extra, action: 'locate' })) as EditorStepResult;
       if (!tg?.ok) return tg ?? { ok: false, message: '目标定位失败' };
-      await click(tg.x ?? 0, tg.y ?? 0);
-      await sleep(400); // 等编辑器完成光标定位
-      await key({ key: 'Escape', code: 'Escape', vk: 27 });
-      await sleep(300);
-      await key({ key: 'Backspace', code: 'Backspace', vk: 8 });
-      const vr = (await step({
-        action: 'verify',
-        textLenBefore: tg.textLenBefore,
-      })) as EditorStepResult;
-      if (!vr?.ok) return vr ?? { ok: false, message: '删除确认失败' };
+      for (let i = 0; i < 8; i++) {
+        await sleep(500);
+        const tg2 = (await step({ ...extra, action: 'locate' })) as EditorStepResult;
+        if (!tg2?.ok) return tg2;
+        const stable =
+          Math.abs((tg2.x ?? 0) - (tg.x ?? 0)) < 2 && Math.abs((tg2.y ?? 0) - (tg.y ?? 0)) < 2;
+        tg = tg2;
+        if (stable) break;
+      }
+      return tg;
+    };
+
+    // ---- 删除一个块：点击 → Esc 块选中 → Backspace，重试最多三次 ----
+    const deleteBlockByClick = async (): Promise<EditorStepResult> => {
+      for (let attempt = 0; attempt < 3; attempt++) {
+        const tg = await stableLocate({ mode: 'delete' });
+        if (!tg?.ok) {
+          // 重试轮里块节点找不到 = 上一轮其实删掉了
+          if (tg?.reason === 'block-node-not-found' && attempt > 0) return { ok: true };
+          return tg ?? { ok: false, message: '目标定位失败' };
+        }
+        await click(tg.x ?? 0, tg.y ?? 0);
+        await sleep(400); // 等编辑器完成光标定位
+        await key({ key: 'Escape', code: 'Escape', vk: 27 });
+        await sleep(300);
+        await key({ key: 'Backspace', code: 'Backspace', vk: 8 });
+        const vr = (await step({
+          action: 'verify',
+          mode: 'delete',
+          timeoutMs: 2500,
+        })) as EditorStepResult;
+        if (vr?.ok) return { ok: true };
+      }
+      return { ok: false, reason: 'verify-timeout', message: '三次 Backspace 后目标块仍未消失' };
+    };
+
+    if (base.mode === 'delete') {
+      const r = await deleteBlockByClick();
+      if (!r.ok) return r;
       return { ok: true, method: 'cdp:backspace' };
+    }
+
+    // ---- replace 改为"先删后插"：删除必须在布局稳定时做（紧跟粘贴之后的删除
+    // 会被布局漂移带偏、误删新内容，公有云实测三轮）。先删掉目标块，再以它
+    // 前面那一块为锚点走 after 粘贴，新内容落在原位置 ----
+    if (base.mode === 'replace' && base.prevBlockId) {
+      const del = await deleteBlockByClick();
+      if (!del.ok) return del;
+      base = {
+        ...base,
+        mode: 'after',
+        blockId: base.prevBlockId,
+        escapeList: base.prevIsList,
+      };
     }
 
     // ---- 写入：剪贴板工具 ----
@@ -472,8 +641,11 @@ async function cdpInject(
           expression: `(async () => {
             const d = document.getElementById('larksnap-cdp-stage');
             if (!d) return 'no-stage';
+            // 纯文本模式暂存台是 textarea（保证兜底复制也只有 text/plain 口味）
+            const isTa = d.tagName === 'TEXTAREA';
             try {
-              const flavors = { 'text/plain': new Blob([d.innerText], { type: 'text/plain' }) };
+              const txt = isTa ? d.value : d.innerText;
+              const flavors = { 'text/plain': new Blob([txt], { type: 'text/plain' }) };
               if (!${plainOnly}) {
                 flavors['text/html'] = new Blob([d.innerHTML], { type: 'text/html' });
               }
@@ -483,11 +655,15 @@ async function cdpInject(
               // 兜底：同一段同步脚本里原子完成「重选暂存节点 + 复制」（分两步会被
               // 页面异步组件插队清选区）
               d.focus();
-              const s = window.getSelection();
-              const r = document.createRange();
-              r.selectNodeContents(d);
-              s.removeAllRanges();
-              s.addRange(r);
+              if (isTa) {
+                d.select();
+              } else {
+                const s = window.getSelection();
+                const r = document.createRange();
+                r.selectNodeContents(d);
+                s.removeAllRanges();
+                s.addRange(r);
+              }
               document.execCommand('copy');
               return 'fallback';
             }
@@ -503,7 +679,9 @@ async function cdpInject(
           func: () => {
             // 隐藏 textarea 里 paste 一次，回读系统剪贴板的纯文本口味和暂存节点比对
             const d = document.getElementById('larksnap-cdp-stage');
-            const want = (d?.innerText || '').replace(/\s+/g, '');
+            const raw =
+              d && d.tagName === 'TEXTAREA' ? (d as HTMLTextAreaElement).value : d?.innerText || '';
+            const want = raw.replace(/\s+/g, '');
             if (!want) return false;
             const ta = document.createElement('textarea');
             ta.style.cssText = 'position:fixed;left:-99999px;top:0;';
@@ -527,15 +705,24 @@ async function cdpInject(
       };
 
       // ---- 分片粘贴：飞书 md 解析对单次粘贴有量的上限（20KB 实测在 238 块处
-      // 截断丢尾），append 大内容按顶层块边界切成小片逐片贴 ----
+      // 截断丢尾），append / replace-all 大内容按顶层块边界切成小片逐片贴 ----
       const chunks =
-        plainOnly && base.mode === 'append'
+        plainOnly && (base.mode === 'append' || base.mode === 'replace-all')
           ? splitMarkdown(base.text ?? '', 6000)
           : [base.text ?? ''];
       let firstLocate: EditorStepResult | null = null;
       for (let ci = 0; ci < chunks.length; ci++) {
-        // 后续片一律贴到文末（前一片粘贴后文档结构已变，原锚点失效）
-        const chunkPatch = ci === 0 ? {} : { blockId: undefined };
+        // 后续片一律按"文末追加"处理（首片粘贴后文档结构已变，原锚点失效；
+        // replace-all 的首片已完成整体替换，后续片自然是接在新内容后面）。
+        // replace（替换单块）改走"先插后删"：粘贴阶段按 after 处理（贴到目标块
+        // 后面的折叠光标处，Markdown 才会被解析——盖在块选中态上的粘贴一律落成
+        // 字面文本，R1 实测），贴完在下方统一删掉目标块，新内容正好落在原位置
+        const chunkPatch: Partial<EditorStepPayload> =
+          ci === 0
+            ? base.mode === 'replace'
+              ? { mode: 'after' }
+              : {}
+            : { blockId: undefined, mode: 'append' };
         const staged = (await step({
           ...chunkPatch,
           action: 'stage-copy',
@@ -548,19 +735,47 @@ async function cdpInject(
             message: '内容写入系统剪贴板失败（回读校验三次未通过），为避免贴入旧内容已中止',
           };
         }
-        const tg = (await step({ ...chunkPatch, action: 'locate' })) as EditorStepResult;
+        const tg = await stableLocate(chunkPatch);
         if (!tg?.ok) return tg ?? { ok: false, message: '目标定位失败' };
         if (ci === 0) firstLocate = tg;
         await click(tg.x ?? 0, tg.y ?? 0);
         await sleep(400); // 等编辑器完成光标定位
 
-        if (base.mode === 'replace' && ci === 0) {
-          // Esc：光标所在块进入"块选中"态，之后的粘贴替换整块
+        if (base.mode === 'replace-all' && ci === 0) {
+          // 全选正文必须交给飞书自己：Blink 的 SelectAll 编辑命令产生原生 DOM 全选，
+          // 会把文档标题卷进去（粘贴后首行洗掉标题），且结果不稳定（R1 实测）。
+          // 正路：Esc 进飞书的块选中态 → 可信 Cmd/Ctrl+A 让飞书的快捷键处理器
+          // "全选所有正文块"（不含标题）→ Backspace 删光正文 → 在空文档的折叠
+          // 光标处粘贴。不能直接把粘贴盖在选区上——飞书的 Markdown 解析只发生在
+          // 折叠光标处的粘贴，盖在选区上的粘贴一律按纯文本落块（R1 实测，
+          // replace-block 对照实验同样中招）。
           await key({ key: 'Escape', code: 'Escape', vk: 27 });
-        } else {
-          // append / after：光标已在锚点块末尾，先回车新起一块再粘贴，
-          // 否则粘贴的首段会并进锚点块内部（标题块尤其难看）
+          await sleep(300);
+          const mod = /Mac/i.test(navigator.userAgent) ? 4 : 2; // Meta=4 / Ctrl=2
+          await key({ key: 'a', code: 'KeyA', vk: 65, modifiers: mod });
+          await sleep(300);
+          await key({ key: 'Backspace', code: 'Backspace', vk: 8 });
+          await sleep(800); // 等编辑器把整批块删完
+          // 删光后飞书仍停留在块选中态（剩下的空块被选着），直接粘贴又成了
+          // "盖在选区上"→ 不解析（R1 实测）。重新定位点击拿到折叠光标，
+          // 复用 append 在空文档上已验证的"点击 → 回车 → 粘贴"套路
+          const tg2 = await stableLocate({ mode: 'append', blockId: undefined });
+          if (!tg2?.ok) return tg2 ?? { ok: false, message: '清空正文后重定位失败' };
+          await click(tg2.x ?? 0, tg2.y ?? 0);
+          await sleep(400);
           await key({ key: 'Enter', code: 'Enter', vk: 13 });
+        } else {
+          // append / after（含 replace 的粘贴阶段）：光标已在锚点块末尾，
+          // 先回车新起一块再粘贴，否则粘贴的首段会并进锚点块内部（标题块尤其难看）
+          await key({ key: 'Enter', code: 'Enter', vk: 13 });
+          // 锚点是列表项时回车续的是列表项，md 语法在列表上下文里不解析
+          // （### 行被吞，公有云实测）——空列表项上再回车一次退出列表变普通段落。
+          // 分片的后续片锚点是 DOM 末块、类型未知，统一补一次回车保险（代价是
+          // 多留一个空段落，与现有粘贴产生的空块观感一致）
+          if ((ci === 0 && base.escapeList) || ci > 0) {
+            await sleep(200);
+            await key({ key: 'Enter', code: 'Enter', vk: 13 });
+          }
         }
         await sleep(300);
 
@@ -582,6 +797,18 @@ async function cdpInject(
         });
       }
 
+      // ---- replace 的删除阶段：新内容已贴在目标块后面，删掉目标块完成替换
+      // （目标块 ID 在粘贴过程中不变，一期实测：没被动过的块 ID 一直有效）----
+      if (base.mode === 'replace') {
+        const r = await deleteBlockByClick();
+        if (!r.ok) {
+          return {
+            ...r,
+            message: `替换的删除阶段失败（新内容已插入，旧块未删）：${r.message ?? ''}`,
+          };
+        }
+      }
+
       const vr = (await step({
         action: 'verify',
         textLenBefore: firstLocate?.textLenBefore,
@@ -594,6 +821,14 @@ async function cdpInject(
       return { ok: true, method: 'cdp:paste' };
     }
   } finally {
+    // 不管成败都等协同推送安静下来再断开（报错路径上内容也可能已进本地模型，
+    // 让它有机会推完，否则服务端丢尾部）
+    try {
+      await waitWsQuiet(60000);
+    } catch {
+      /* 忽略 */
+    }
+    chrome.debugger.onEvent.removeListener(onWs);
     try {
       await chrome.debugger.detach(dbg);
     } catch {

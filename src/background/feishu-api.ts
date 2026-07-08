@@ -99,24 +99,79 @@ export async function fetchClientVars(doc: ResolvedDoc): Promise<Json> {
   const skipped = new Set<string>(
     Array.isArray(data.skip_blocks) ? (data.skip_blocks as string[]) : []
   );
-
-  // 翻页：mode=4 + cursor，合并附加块
+  // 跨页合并 block_sequence（顶层顺序的兜底来源）
+  const sequence: string[] = Array.isArray(data.block_sequence)
+    ? (data.block_sequence as unknown[]).map(String)
+    : [];
+  const seqSeen = new Set(sequence);
+  const mergeSeq = (pd: Record<string, unknown>) => {
+    if (!Array.isArray(pd.block_sequence)) return;
+    for (const s of pd.block_sequence as unknown[]) {
+      const id = String(s);
+      if (!seqSeen.has(id)) {
+        seqSeen.add(id);
+        sequence.push(id);
+      }
+    }
+  };
+  // 翻页，合并附加块（块条目重复出现时 children 取并集，
+  // 不能整条覆盖——根块的 children 就是顶层顺序，覆盖会丢前页的列表）
   let cursor = (data.cursor as string) ?? '';
+  let nextCursors = data.next_cursors;
   let hasMore = Boolean(data.has_more);
   let guard = 0;
+  // 根块（page 块）ID：翻页要作为 pagingRootID 传给服务端（缺了报 4000091）
+  const rootBlockId =
+    Object.entries(blockMap).find(([, e]) => {
+      const entry = e as Record<string, unknown>;
+      const t = (entry.data as Record<string, unknown> | undefined)?.type ?? entry.type;
+      return t === 'page';
+    })?.[0] ?? doc.objToken;
+  // 续页参数没有公开文档，按实测有效顺序穷举（iflytek 私有化实测 mode=1+cursor+limit 有效；
+  // mode=4 不带 block_id 报 4000091，带了则不报错但永远返回第一屏）。
+  // 成功判据必须是"返回了新块 ID"，用"有块"判会被第一屏骗成死循环。
+  let winner = '';
   while (hasMore && guard < 50) {
     guard++;
-    const page = (await feishuGet(
-      `/space/api/docx/pages/client_vars?id=${doc.objToken}&mode=4&cursor=${encodeURIComponent(
-        cursor
-      )}${wikiPart}`
-    )) as Json;
-    const pd = (page.data ?? {}) as Record<string, unknown>;
-    Object.assign(blockMap, (pd.block_map ?? {}) as Record<string, unknown>);
+    const next = firstCursorOf(nextCursors);
+    const variants: Array<{ tag: string; q: string }> = [];
+    const push = (tag: string, q: string, c: string) => {
+      if (c) variants.push({ tag, q: `${q}&cursor=${encodeURIComponent(c)}&limit=239` });
+    };
+    push('m1', 'mode=1', cursor);
+    push('m1n', 'mode=1', next);
+    push('prid', `mode=4&paging_root_id=${rootBlockId}`, cursor);
+    push('bidn', `mode=4&block_id=${rootBlockId}`, next);
+    push('bid', `mode=4&block_id=${rootBlockId}`, cursor);
+    const tryOrder = winner
+      ? [
+          ...variants.filter((v) => v.tag === winner),
+          ...variants.filter((v) => v.tag !== winner),
+        ]
+      : variants;
+    let pd: Record<string, unknown> | null = null;
+    for (const v of tryOrder) {
+      const page = (await feishuGet(
+        `/space/api/docx/pages/client_vars?id=${doc.objToken}&${v.q}${wikiPart}`
+      )) as Json;
+      const cand = (page.data ?? {}) as Record<string, unknown>;
+      const fresh = Object.keys((cand.block_map as object) ?? {}).filter(
+        (id) => !(id in blockMap)
+      ).length;
+      if (fresh > 0) {
+        pd = cand;
+        winner = v.tag;
+        break;
+      }
+    }
+    if (!pd) break; // 没有任何组合能拿到新块：停止翻页，导出已合并部分
+    mergeBlockMap(blockMap, (pd.block_map ?? {}) as Record<string, unknown>);
+    mergeSeq(pd);
     for (const s of (pd.skip_blocks as string[]) ?? []) skipped.add(String(s));
     hasMore = Boolean(pd.has_more);
     cursor = (pd.cursor as string) ?? '';
-    if (!cursor) break;
+    nextCursors = pd.next_cursors;
+    if (!cursor && !firstCursorOf(nextCursors)) break;
   }
 
   // 补拉被跳过的子树：mode=4 + block_id（表格单元格及其正文块从这里来）
@@ -137,7 +192,7 @@ export async function fetchClientVars(doc: ResolvedDoc): Promise<Json> {
         )}&limit=239${wikiPart}`
       )) as Json;
       const pd = (page.data ?? {}) as Record<string, unknown>;
-      Object.assign(blockMap, (pd.block_map ?? {}) as Record<string, unknown>);
+      mergeBlockMap(blockMap, (pd.block_map ?? {}) as Record<string, unknown>);
       // 子树里可能还有下一层被跳过的块，入队继续补
       for (const s of (pd.skip_blocks as string[]) ?? []) {
         if (!done.has(String(s))) pending.push(String(s));
@@ -149,8 +204,62 @@ export async function fetchClientVars(doc: ResolvedDoc): Promise<Json> {
   }
 
   data.block_map = blockMap;
+  data.block_sequence = sequence;
   first.data = data;
   return first;
+}
+
+/** next_cursors 可能是字符串 / 字符串数组 / 对象，取第一个非空字符串 */
+function firstCursorOf(nc: unknown): string {
+  if (typeof nc === 'string') return nc;
+  if (Array.isArray(nc)) {
+    for (const v of nc) if (typeof v === 'string' && v) return v;
+    return '';
+  }
+  if (nc && typeof nc === 'object') {
+    for (const v of Object.values(nc as Record<string, unknown>)) {
+      if (typeof v === 'string' && v) return v;
+    }
+  }
+  return '';
+}
+
+/** 合并翻页返回的 block_map：已有条目的 children 取并集（保持先见顺序），其余字段用新条目 */
+function mergeBlockMap(
+  into: Record<string, unknown>,
+  add: Record<string, unknown>
+): void {
+  for (const [id, entry] of Object.entries(add)) {
+    const prev = into[id] as Record<string, unknown> | undefined;
+    if (!prev) {
+      into[id] = entry;
+      continue;
+    }
+    const kids = [...readChildren(prev)];
+    const seen = new Set(kids);
+    for (const c of readChildren(entry as Record<string, unknown>)) {
+      if (!seen.has(c)) {
+        seen.add(c);
+        kids.push(c);
+      }
+    }
+    into[id] = { ...prev, ...(entry as Record<string, unknown>), children: kids };
+  }
+}
+
+/** 读原始条目的 children（可能在 entry.children 或 entry.data.children，数组或 {default:[...]}） */
+function readChildren(entry: Record<string, unknown>): string[] {
+  const raw =
+    entry.children ?? (entry.data as Record<string, unknown> | undefined)?.children;
+  if (Array.isArray(raw)) return raw.map(String);
+  if (raw && typeof raw === 'object') {
+    const out: string[] = [];
+    for (const v of Object.values(raw as Record<string, unknown>)) {
+      if (Array.isArray(v)) out.push(...v.map(String));
+    }
+    return out;
+  }
+  return [];
 }
 
 // ==================== 导出任务（PDF / Word / 官方 md） ====================
