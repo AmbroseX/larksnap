@@ -242,8 +242,8 @@ export async function editorStepInPage(p: EditorStepPayload): Promise<EditorStep
         };
       }
       let node = p.blockId ? findBlockNode(p.blockId) : null;
-      if (!node && p.blockId && p.mode !== 'append') {
-        // 长文档虚拟化渲染：块不在视口附近就不在 DOM 里，滚动扫描全文找它
+      if (!node && p.blockId) {
+        // 长文档虚拟化渲染：块不在视口附近就不在 DOM 里，得滚动让虚拟化补渲染
         const scroller =
           (function findScroller(el: HTMLElement | null): HTMLElement | null {
             for (let cur = el; cur; cur = cur.parentElement) {
@@ -251,7 +251,23 @@ export async function editorStepInPage(p: EditorStepPayload): Promise<EditorStep
             }
             return null;
           })(root) || (document.scrollingElement as HTMLElement | null);
-        if (scroller) {
+        if (scroller && p.mode === 'append') {
+          // append 的目标是服务端给的"真末块"：直接滚到底。scrollHeight 会随
+          // 补渲染继续增长，循环"滚到底 → 等一拍"直到找到块或高度稳定
+          //（此前 append 被排除在滚动之外，长文档下退回"DOM 末块"，内容插进中间）
+          let lastH = -1;
+          let stable = 0;
+          for (let i = 0; i < 60 && !node; i++) {
+            scroller.scrollTop = scroller.scrollHeight;
+            await sleep(300);
+            node = findBlockNode(p.blockId);
+            const h = scroller.scrollHeight;
+            stable = h === lastH ? stable + 1 : 0;
+            lastH = h;
+            if (stable >= 4) break; // 高度连续 1.2s 不变：已到真末尾
+          }
+        } else if (scroller && p.mode !== 'append') {
+          // after / replace / delete：从头滚动扫描全文找目标块
           const stepPx = Math.max(300, window.innerHeight * 0.8);
           for (let pos = 0; pos <= scroller.scrollHeight && !node; pos += stepPx) {
             scroller.scrollTop = pos;

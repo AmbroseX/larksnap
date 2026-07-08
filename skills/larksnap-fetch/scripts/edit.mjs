@@ -60,6 +60,22 @@ const EDIT_ERROR_KINDS = {
 // ==================== 参数解析 ====================
 
 const argv = process.argv.slice(2);
+
+// USAGE_HINT 必须先于解析循环定义：循环里遇到未知旗标就会调 usage()
+const USAGE_HINT = [
+  '用法: edit.mjs <链接> append <md文件>',
+  '     edit.mjs <链接> insert-after "<标题文本>" <md文件>',
+  '     edit.mjs <链接> list-blocks',
+  '     edit.mjs <链接> replace-block <块ID> <md文件> --expect "<内容摘要>"',
+  '     edit.mjs <链接> delete-block <块ID> --expect "<内容摘要>"',
+  '     edit.mjs <链接> insert-after-block <块ID> <md文件>',
+  '     edit.mjs <链接> replace-all <md文件> --expect-first "<首块内容摘要>"',
+].join('\n  ');
+
+function usage(message) {
+  fail({ type: 'usage', subtype: 'bad_args', message, hint: USAGE_HINT });
+}
+
 const FLAGS_WITH_VALUE = new Set(['--profile', '--expect', '--expect-first']);
 // 默认走纯文本 Markdown 口味粘贴（飞书自己解析转块：表格转原生简单表格而非
 // 异步提交的内嵌电子表格，代码块注释行也不会被误判成标题）。
@@ -78,20 +94,6 @@ for (let i = 0; i < argv.length; i++) {
     continue;
   }
   positionals.push(argv[i]);
-}
-
-const USAGE_HINT = [
-  '用法: edit.mjs <链接> append <md文件>',
-  '     edit.mjs <链接> insert-after "<标题文本>" <md文件>',
-  '     edit.mjs <链接> list-blocks',
-  '     edit.mjs <链接> replace-block <块ID> <md文件> --expect "<内容摘要>"',
-  '     edit.mjs <链接> delete-block <块ID> --expect "<内容摘要>"',
-  '     edit.mjs <链接> insert-after-block <块ID> <md文件>',
-  '     edit.mjs <链接> replace-all <md文件> --expect-first "<首块内容摘要>"',
-].join('\n  ');
-
-function usage(message) {
-  fail({ type: 'usage', subtype: 'bad_args', message, hint: USAGE_HINT });
 }
 
 const [url, op] = positionals;
@@ -187,6 +189,9 @@ async function embedImages(md, baseDir) {
       out.push(line);
       continue;
     }
+    // 行内代码 span 的范围（`![](图片)` 这种示例不是真图片引用，和围栏同理不动）
+    const codeSpans = [...line.matchAll(/`[^`]*`/g)].map((c) => [c.index, c.index + c[0].length]);
+    const inCode = (i) => codeSpans.some(([s, e]) => i >= s && i < e);
     // 逐个替换本行的图片引用（串行 await，图片通常不多）
     let result = '';
     let last = 0;
@@ -194,8 +199,8 @@ async function embedImages(md, baseDir) {
       const [full, alt, src] = m;
       result += line.slice(last, m.index);
       last = m.index + full.length;
-      if (src.startsWith('data:')) {
-        result += full; // 已是内嵌，原样保留
+      if (src.startsWith('data:') || inCode(m.index)) {
+        result += full; // 已是内嵌 / 行内代码里的示例，原样保留
         continue;
       }
       const { mime, buf } = await loadImage(src, baseDir);

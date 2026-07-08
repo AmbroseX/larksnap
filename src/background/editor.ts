@@ -132,12 +132,14 @@ export async function runEditJob(job: EditJob, reply: Reply): Promise<void> {
       plainOnly: job.opts.mdPaste === true,
     };
 
-    // 第一级：合成 paste 快速尝试；被拒收（绝大多数飞书部署）→ CDP 可信输入兜底
+    // 第一级：合成 paste 快速尝试；被拒收（绝大多数飞书部署）→ CDP 可信输入兜底。
+    // 合成路径报"块不在 DOM"也走 CDP：块在服务端树里刚确认过存在（resolveTarget），
+    // DOM 里没有只是长文档虚拟化把它卸载了，CDP 的 locate 会滚动扫描找回来
     let r = (await runInPage(tabId, editorStepInPage, {
       ...base,
       action: 'synthetic',
     })) as EditorStepResult;
-    if (!r?.ok && r?.reason === 'synthetic-rejected') {
+    if (!r?.ok && (r?.reason === 'synthetic-rejected' || r?.reason === 'block-node-not-found')) {
       const granted = await chrome.permissions.contains({ permissions: ['debugger'] });
       if (!granted) {
         reply({ type: 'need-edit-grant' });
@@ -415,6 +417,19 @@ function meaningfulLines(md: string): string[] {
     .filter((l) => l.length >= 2 && !/^[:\-\s]+$/.test(l));
 }
 
+/** append 源内容以普通文本行收尾吗——以表格行/图片收尾时，末行指纹（表格行和
+ *  图片不进 meaningfulLines）对不上文档末块（表格单元格），位置判据会假失败，
+ *  退回包含性检查 */
+function appendTailIsPlain(md: string): boolean {
+  const last =
+    md
+      .split('\n')
+      .map((s) => s.trim())
+      .filter(Boolean)
+      .pop() ?? '';
+  return !!last && !last.startsWith('|') && !/^!\[[^\]]*\]\([^)]*\)$/.test(last);
+}
+
 /** md 里的图片引用数（纯图片写入没有文本指纹，回读改用 image 块数量判定） */
 function countMdImages(md: string): number {
   return (md.match(/!\[[^\]]*\]\(/g) ?? []).length;
@@ -461,7 +476,24 @@ async function verify(
         .map((b) => plainText(b.text))
         .join('\n')
     );
-    return docText.includes(normalize(lines[0])) && docText.includes(normalize(lines[lines.length - 1]));
+    const headHit = docText.includes(normalize(lines[0]));
+    const tailWant = normalize(lines[lines.length - 1]);
+    if (target.mode === 'append' && appendTailIsPlain(job.contentMd ?? '')) {
+      // append 用位置判据：包含性检查分不清"落在末尾"还是"插在中间"（长文档
+      // 虚拟化下 append 曾把内容插进中间还报成功）。要求服务端顺序上最后一个
+      // 有文本的块就是源内容末行——分片粘贴会在尾部多留空段落、分隔线/图片块
+      // 没有文本，所以从后往前找第一个非空文本块来比
+      const flat = flatten(tree);
+      for (let i = flat.length - 1; i >= 0; i--) {
+        const b = tree.map[flat[i].id];
+        if (!b) continue;
+        const t = normalize(plainText(b.text));
+        if (!t) continue;
+        return headHit && t.includes(tailWant);
+      }
+      return false; // 文档里一个有文本的块都没有：追加肯定没落地
+    }
+    return headHit && docText.includes(tailWant);
   } catch {
     return false; // 回读失败按未确认处理（上层报 save_unconfirmed）
   }
@@ -853,8 +885,13 @@ async function cdpInject(
         // 大内容飞书要渲染更久，超时按内容大小自适应（19KB 实测 5s 不够）
         timeoutMs: Math.min(30000, 5000 + (base.text?.length ?? 0)),
       })) as EditorStepResult;
-      if (!vr?.ok) return vr ?? { ok: false, message: '写入确认失败' };
-      return { ok: true, method: 'cdp:paste' };
+      // DOM 指纹校验只是快速通道，不做硬门槛：长文档虚拟化渲染下指纹可能
+      // 在视口外、DOM 里根本看不见。超时不报错返回（那会短路掉服务端终验，
+      // 报假 inject_failed），带着"DOM 未确认"标记继续，由服务端回读下最终结论
+      if (!vr?.ok && vr?.reason !== 'verify-timeout') {
+        return vr ?? { ok: false, message: '写入确认失败' };
+      }
+      return { ok: true, method: vr?.ok ? 'cdp:paste' : 'cdp:paste（DOM 未确认）' };
     }
   } finally {
     // 不管成败都等协同推送安静下来再断开（报错路径上内容也可能已进本地模型，
