@@ -157,6 +157,117 @@ if (mdFile) {
   }
 }
 
+// ==================== 图片内嵌（实验 I1/I2 结论，2026-07-08） ====================
+// 飞书只认「HTML 粘贴里的 data URI 图片」（转成 image 块并上传）；md 文本粘贴里的
+// 图片留成字面文本，HTML 粘贴里的外链图片被整个丢弃。所以：
+//   本地路径 / 外链 → 这里统一转成 data URI 内嵌，并强制该次写入走 HTML 粘贴。
+// 代码围栏里的图片语法是示例代码，不动。
+
+// 只收实测飞书粘贴接受的格式（2026-07-08 iflytek 实测：png/jpg/gif/webp/bmp 转成
+// image 块；svg/ico 被静默丢弃——静默丢图不如在这里直接报错）
+const IMAGE_MIME = {
+  png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif',
+  webp: 'image/webp', bmp: 'image/bmp',
+};
+
+/** 把 md 里的本地/外链图片转成 data URI；返回 { md, embedded } */
+async function embedImages(md, baseDir) {
+  const imgRe = /!\[([^\]]*)\]\(([^)\s]+)(?:\s+"[^"]*")?\)/g;
+  const lines = md.split('\n');
+  let inFence = false;
+  let embedded = 0;
+  const out = [];
+  for (const line of lines) {
+    if (/^\s*(```|~~~)/.test(line)) {
+      inFence = !inFence;
+      out.push(line);
+      continue;
+    }
+    if (inFence || !line.includes('![')) {
+      out.push(line);
+      continue;
+    }
+    // 逐个替换本行的图片引用（串行 await，图片通常不多）
+    let result = '';
+    let last = 0;
+    for (const m of line.matchAll(imgRe)) {
+      const [full, alt, src] = m;
+      result += line.slice(last, m.index);
+      last = m.index + full.length;
+      if (src.startsWith('data:')) {
+        result += full; // 已是内嵌，原样保留
+        continue;
+      }
+      const { mime, buf } = await loadImage(src, baseDir);
+      embedded++;
+      result += `![${alt}](data:${mime};base64,${buf.toString('base64')})`;
+    }
+    result += line.slice(last);
+    out.push(result);
+  }
+  return { md: out.join('\n'), embedded };
+}
+
+/** 读一张图片：外链下载 / 本地文件读取（相对路径以 md 文件所在目录为基准） */
+async function loadImage(src, baseDir) {
+  if (/^https?:\/\//i.test(src)) {
+    let res;
+    try {
+      res = await fetch(src, { signal: AbortSignal.timeout(20000) });
+    } catch (e) {
+      fail({
+        type: 'edit', subtype: 'image_fetch_failed',
+        message: `外链图片下载失败: ${src}（${e instanceof Error ? e.message : String(e)}）`,
+        hint: '确认外链可访问，或先手工下载图片改用本地路径。', retryable: true,
+      });
+    }
+    if (!res.ok) {
+      fail({
+        type: 'edit', subtype: 'image_fetch_failed',
+        message: `外链图片下载失败: ${src}（HTTP ${res.status}）`,
+        hint: '确认外链可访问，或先手工下载图片改用本地路径。', retryable: true,
+      });
+    }
+    const ct = (res.headers.get('content-type') || '').split(';')[0].trim();
+    const buf = Buffer.from(await res.arrayBuffer());
+    const allowed = new Set(Object.values(IMAGE_MIME));
+    const extMime = IMAGE_MIME[src.split('?')[0].split('.').pop()?.toLowerCase() ?? ''];
+    const mime = allowed.has(ct) ? ct : extMime;
+    if (!mime) {
+      const kind = ct.startsWith('image/') ? 'image_unsupported' : 'image_fetch_failed';
+      fail({
+        type: 'edit', subtype: kind,
+        message: kind === 'image_unsupported'
+          ? `外链图片格式飞书不接受: ${src}（${ct}）`
+          : `外链不是图片: ${src}（content-type: ${ct || '未知'}）`,
+        hint: kind === 'image_unsupported'
+          ? `支持: ${Object.keys(IMAGE_MIME).join(' / ')}（svg/ico 飞书粘贴会静默丢弃）。请先转换格式。`
+          : '确认链接指向图片文件本身，不是网页。',
+        retryable: false,
+      });
+    }
+    return { mime, buf };
+  }
+  const p = path.resolve(baseDir, decodeURI(src));
+  const mime = IMAGE_MIME[p.split('.').pop()?.toLowerCase() ?? ''];
+  if (!mime) {
+    fail({
+      type: 'edit', subtype: 'image_unsupported',
+      message: `不支持的图片格式: ${src}`,
+      hint: `支持: ${Object.keys(IMAGE_MIME).join(' / ')}。`, retryable: false,
+    });
+  }
+  try {
+    return { mime, buf: fs.readFileSync(p) };
+  } catch {
+    fail({
+      type: 'edit', subtype: 'image_not_found',
+      message: `本地图片不存在: ${p}（相对路径以 md 文件所在目录为基准）`,
+      hint: '检查图片路径；相对路径相对于 md 文件所在目录解析。', retryable: false,
+    });
+  }
+}
+
 // ==================== 主流程 ====================
 
 main().catch((e) => {
@@ -170,6 +281,23 @@ main().catch((e) => {
 });
 
 async function main() {
+  let mdPaste = !flags['--html-paste'];
+  if (contentMd && /!\[[^\]]*\]\(/.test(contentMd)) {
+    const { md, embedded } = await embedImages(contentMd, path.dirname(path.resolve(mdFile)));
+    contentMd = md;
+    if (embedded > 0 || /!\[[^\]]*\]\(data:/.test(contentMd)) {
+      // 含图片的写入只能走 HTML 粘贴（md 文本粘贴丢图，实验 I2 结论）
+      mdPaste = false;
+      process.stderr.write(`… 已内嵌 ${embedded} 张图片，本次写入走 HTML 粘贴口味\n`);
+    }
+    if (Buffer.byteLength(contentMd) > 2 * 1024 * 1024) {
+      fail({
+        type: 'edit', subtype: 'image_too_large',
+        message: '图片内嵌后内容超过 2MB 上限。',
+        hint: '压缩图片，或把内容拆成多次写入（每次带更少的图片）。', retryable: false,
+      });
+    }
+  }
   await ensureDaemon(DAEMON_PATH, fail);
   await postCommand(
     {
@@ -178,7 +306,7 @@ async function main() {
       op,
       contentMd: contentMd || undefined,
       anchor: anchor || undefined,
-      opts: { mdPaste: !flags['--html-paste'] },
+      opts: { mdPaste },
       contextId: flags['--profile'] || undefined,
     },
     handleLine,

@@ -113,6 +113,9 @@ export async function runEditJob(job: EditJob, reply: Reply): Promise<void> {
       return;
     }
 
+    // 纯图片写入的回读判据是 image 块净增量，先记下写入前的数量
+    const beforeImages = countImageBlocks(tree);
+
     reply({ type: 'progress', message: '正在把内容写入编辑器…', percent: 40 });
     const base: Omit<EditorStepPayload, 'action'> = {
       mode: target.mode,
@@ -161,16 +164,16 @@ export async function runEditJob(job: EditJob, reply: Reply): Promise<void> {
     await new Promise((res) => setTimeout(res, 2000));
     // 回读一次不中就再等 3s 重试一次（服务端落库可能比页面确认慢）；
     // 还不中再按内容大小加一轮（大内容几百个块的落库实测能超过 5 秒）
-    let verified = await verify(info, job, target);
+    let verified = await verify(info, job, target, beforeImages);
     if (!verified) {
       await new Promise((res) => setTimeout(res, 3000));
-      verified = await verify(info, job, target);
+      verified = await verify(info, job, target, beforeImages);
     }
     if (!verified && (job.contentMd?.length ?? 0) > 2000) {
       await new Promise((res) =>
         setTimeout(res, Math.min(15000, 3000 + (job.contentMd?.length ?? 0)))
       );
-      verified = await verify(info, job, target);
+      verified = await verify(info, job, target, beforeImages);
     }
     void track({ name: 'edit', url: '/edit/task', data: { ok: verified, op: job.op, method: r.method ?? '' } });
     if (!verified) {
@@ -395,7 +398,8 @@ function resolveTarget(job: EditJob, tree: BlockTree): Target | { error: Record<
 // ==================== 回读校验 ====================
 
 /** 取 Markdown 里有比对价值的行（剥掉块前缀与行内标记；表格行整行剔除——
- *  表格贴成飞书原生表格后读管线读不到单元格文字，拿表格行比对必假失败） */
+ *  表格贴成飞书原生表格后读管线读不到单元格文字，拿表格行比对必假失败；
+ *  图片引用整个剔除——alt 文本不进渲染结果，拿它比对必假失败） */
 function meaningfulLines(md: string): string[] {
   return md
     .split('\n')
@@ -403,12 +407,22 @@ function meaningfulLines(md: string): string[] {
       let l = raw.trim();
       if (l.startsWith('|')) return '';
       l = l.replace(/^(#{1,9}|[-*+]|\d+\.|>+)\s+/, '');
-      l = l.replace(/!\[([^\]]*)\]\([^)]*\)/g, '$1');
+      l = l.replace(/!\[[^\]]*\]\([^)]*\)/g, '');
       l = l.replace(/\[([^\]]*)\]\([^)]*\)/g, '$1');
       l = l.replace(/[*_`~|]/g, ' ');
       return l.trim();
     })
     .filter((l) => l.length >= 2 && !/^[:\-\s]+$/.test(l));
+}
+
+/** md 里的图片引用数（纯图片写入没有文本指纹，回读改用 image 块数量判定） */
+function countMdImages(md: string): number {
+  return (md.match(/!\[[^\]]*\]\(/g) ?? []).length;
+}
+
+/** 块树里 image 类型块的数量 */
+function countImageBlocks(tree: BlockTree): number {
+  return Object.values(tree.map).filter((b) => /image/i.test(b.type)).length;
 }
 
 /**
@@ -418,7 +432,8 @@ function meaningfulLines(md: string): string[] {
 async function verify(
   info: DocInfo,
   job: EditJob,
-  target: Target
+  target: Target,
+  beforeImages: number
 ): Promise<boolean> {
   try {
     const { tree } = await readTree(info);
@@ -433,6 +448,13 @@ async function verify(
       return false;
     }
     const lines = meaningfulLines(job.contentMd ?? '');
+    const mdImages = countMdImages(job.contentMd ?? '');
+    if (!lines.length && mdImages > 0) {
+      // 纯图片写入：没有文本指纹，用 image 块数量判定（计划功能 2 的设计）。
+      // replace-all 已清空旧内容，直接要求数量到位；其余模式要求净增
+      const after = countImageBlocks(tree);
+      return target.mode === 'replace-all' ? after >= mdImages : after >= beforeImages + mdImages;
+    }
     if (!lines.length) return true; // 没有可比对的文本（如纯分隔线）→ 视为通过
     const docText = normalize(
       Object.values(tree.map)
@@ -682,7 +704,20 @@ async function cdpInject(
             const raw =
               d && d.tagName === 'TEXTAREA' ? (d as HTMLTextAreaElement).value : d?.innerText || '';
             const want = raw.replace(/\s+/g, '');
-            if (!want) return false;
+            if (!want) {
+              // 纯图片内容没有文本口味可比：贴到隐藏 contenteditable 里，
+              // 看 HTML 口味的 <img> 是否落进来
+              if (!d?.querySelector?.('img')) return false;
+              const dv = document.createElement('div');
+              dv.contentEditable = 'true';
+              dv.style.cssText = 'position:fixed;left:-99999px;top:0;width:100px;height:50px;';
+              document.body.appendChild(dv);
+              dv.focus();
+              document.execCommand('paste');
+              const ok = dv.querySelector('img') != null;
+              dv.remove();
+              return ok;
+            }
             const ta = document.createElement('textarea');
             ta.style.cssText = 'position:fixed;left:-99999px;top:0;';
             document.body.appendChild(ta);
@@ -812,6 +847,7 @@ async function cdpInject(
       const vr = (await step({
         action: 'verify',
         textLenBefore: firstLocate?.textLenBefore,
+        blockCountBefore: firstLocate?.blockCountBefore,
         fingerprintExisted: firstLocate?.fingerprintExisted,
         tailExisted: firstLocate?.tailExisted,
         // 大内容飞书要渲染更久，超时按内容大小自适应（19KB 实测 5s 不够）

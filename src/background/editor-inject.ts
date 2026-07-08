@@ -40,6 +40,9 @@ export interface EditorStepPayload {
   tailExisted?: boolean;
   /** verify 用：locate 步骤返回的注入前编辑器文本长度（去空白） */
   textLenBefore?: number;
+  /** verify 用：locate 步骤返回的注入前块节点数量（纯图片写入文本不变，
+   *  退化判据看块数量净增） */
+  blockCountBefore?: number;
   /** verify 用：注入前文档里是否已含指纹（重复内容场景退化为长度判定） */
   fingerprintExisted?: boolean;
   /** verify 轮询超时毫秒数（默认 5000） */
@@ -70,6 +73,8 @@ export interface EditorStepResult {
   method?: string;
   /** locate 步骤返回：注入前编辑器文本长度（去空白后） */
   textLenBefore?: number;
+  /** locate 步骤返回：注入前块节点数量 */
+  blockCountBefore?: number;
   /** locate 步骤返回：指纹是否已存在于注入前文本 */
   fingerprintExisted?: boolean;
   /** locate 步骤返回：末行指纹是否已存在于注入前文本 */
@@ -271,6 +276,7 @@ export async function editorStepInPage(p: EditorStepPayload): Promise<EditorStep
       const base = {
         ok: true,
         textLenBefore: before.length,
+        blockCountBefore: document.querySelectorAll('[data-record-id],[data-block-id]').length,
         fingerprintExisted: !!fingerprint && before.includes(fingerprint),
         tailExisted: !!tailFp && before.includes(tailFp),
       };
@@ -339,10 +345,15 @@ export async function editorStepInPage(p: EditorStepPayload): Promise<EditorStep
           const now = editorText();
           const headUsable = !!fingerprint && !p.fingerprintExisted;
           const tailUsable = !!tailFp && !p.tailExisted;
+          // 没有可用指纹（纯图片写入等）→ 退化判据：文本变长或块数量净增
+          const blocksNow = document.querySelectorAll('[data-record-id],[data-block-id]').length;
           hit =
             (headUsable && now.includes(fingerprint)) ||
             (tailUsable && now.includes(tailFp)) ||
-            (!headUsable && !tailUsable && now.length > (p.textLenBefore ?? 0));
+            (!headUsable &&
+              !tailUsable &&
+              (now.length > (p.textLenBefore ?? 0) ||
+                (p.blockCountBefore != null && blocksNow > p.blockCountBefore)));
         }
         if (hit) return { ok: true };
         await sleep(200);
