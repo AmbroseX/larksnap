@@ -80,6 +80,66 @@ export async function fetchMeta(token: string): Promise<Json> {
   return (await feishuGet(`/space/api/meta/?token=${token}&type=22`)) as Json;
 }
 
+// ==================== 新建文档 ====================
+
+/** 新建文档结果：只建空文档，正文需另走编辑粘贴 */
+export interface CreatedDoc {
+  /** 文档本体 obj_token（喂 client_vars / edit 用这个） */
+  objToken: string;
+  /** explorer 节点 token（列目录/移动/删除用） */
+  nodeToken: string;
+  /** 新文档绝对地址 /docx/{objToken} */
+  url: string;
+}
+
+/**
+ * 新建一篇空 docx 文档（公有云 + 私有化通用，实测同接口同结构）。
+ *
+ * ⚠️ 只创建空文档：飞书正文改动走协同 WebSocket 不走 HTTP，
+ * 要写内容请拿 objToken 拼 /docx/{token} 后复用编辑（append）粘贴。
+ * ⚠️ body 必须表单编码（form:true）：发 JSON 会被判 code:2 Parameter Error。
+ *
+ * @param opts.name 文档标题（空 = 未命名）
+ * @param opts.parentToken 目标文件夹节点 token（空 = 我的空间根目录）
+ */
+export async function createDocx(opts?: {
+  name?: string;
+  parentToken?: string;
+}): Promise<CreatedDoc> {
+  const res = (await feishuPost(
+    `/space/api/explorer/v2/create/object/`,
+    {
+      parent_token: opts?.parentToken ?? '',
+      type: 22, // 22 = docx 新版文档
+      name: opts?.name ?? '',
+      time_zone: 'Asia/Shanghai',
+      source: 0,
+      ua_type: 'Web',
+      scene: 'space_create',
+    },
+    { form: true }
+  )) as Json;
+
+  if (res.code !== 0) {
+    // 未登录/CSRF 时 feishuPost 返回 { __raw, __status }（非标准 JSON），
+    // 把原始文案透出来，好让上层 isLoginError 认出"需登录"（含 csrf / 40x）
+    const raw = (res as Record<string, unknown>).__raw;
+    throw new Error(
+      `新建文档失败: code=${String(res.code)} ${String(res.msg ?? raw ?? '')}`
+    );
+  }
+  const data = (res.data ?? {}) as Record<string, unknown>;
+  const nodeToken = Array.isArray(data.node_list)
+    ? String((data.node_list as unknown[])[0] ?? '')
+    : '';
+  const nodes = ((data.entities as Record<string, unknown> | undefined)?.nodes ??
+    {}) as Record<string, Record<string, unknown>>;
+  const node = nodes[nodeToken];
+  const objToken = String(node?.obj_token ?? '');
+  if (!objToken) throw new Error('新建文档成功但未取到 obj_token');
+  return { objToken, nodeToken, url: String(node?.url ?? '') };
+}
+
 /**
  * 拉取完整 client_vars 块内容（含 mode=4 翻页直到 has_more=false）。
  * 首屏会把表格等大块的子树列进 skip_blocks 跳过不发，需要再按块补拉，

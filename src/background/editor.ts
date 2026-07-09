@@ -3,7 +3,7 @@ import type { Block, DocInfo } from '../shared/types';
 import { detectDocFromUrl } from '../content/feishu-detect';
 import { hasPermissionForHost } from './permissions';
 import { setContentTab } from './feishu-proxy';
-import { resolveObjToken, fetchClientVars } from './feishu-api';
+import { resolveObjToken, fetchClientVars, createDocx } from './feishu-api';
 import { buildBlockTree, type BlockTree } from './convert/adapter';
 import { plainText } from './convert/apool';
 import { waitForTabComplete } from './tab-util';
@@ -37,6 +37,8 @@ export interface EditJob {
     regex?: boolean;
     typeFilter?: string;
     limit?: number;
+    // new-doc 的新建标题
+    name?: string;
   };
   opts: { keepTab?: boolean; mdPaste?: boolean };
 }
@@ -55,7 +57,23 @@ interface FlatBlock {
 
 export async function runEditJob(job: EditJob, reply: Reply): Promise<void> {
   let tabId: number | undefined;
+  // new-doc 时记下新文档地址，用于收尾时把它带进结果回给用户
+  let newDocUrl: string | undefined;
   try {
+    // new-doc：先在租户页面上下文里建一篇空 docx，再把它当 append 目标写内容。
+    // 创建接口只生成空文档（正文走协同 WS 不走 HTTP），建完后复用既有 append 管线。
+    if (job.op === 'new-doc') {
+      const created = await createEmptyDoc(job, reply);
+      if (created == null) return; // 出错已在内部 reply
+      newDocUrl = created.url;
+      if (!job.contentMd) {
+        reply({ type: 'result', message: `已新建空文档：${created.url}`, url: created.url });
+        return;
+      }
+      reply({ type: 'progress', message: '已新建文档，正在写入内容…', percent: 20 });
+      job = { ...job, url: created.url, op: 'append' };
+    }
+
     const info = detectDocFromUrl(job.url);
     if (!info.isFeishuDoc || !['docx', 'wiki'].includes(info.docType)) {
       reply({
@@ -197,13 +215,19 @@ export async function runEditJob(job: EditJob, reply: Reply): Promise<void> {
       reply({
         type: 'error',
         subtype: 'save_unconfirmed',
-        message: `内容已注入编辑器（${r.method}）但回读未确认落地，内容可能已进文档，请人工检查`,
+        message:
+          `内容已注入编辑器（${r.method}）但回读未确认落地，内容可能已进文档，请人工检查` +
+          (newDocUrl ? `（新文档：${newDocUrl}）` : ''),
+        ...(newDocUrl ? { url: newDocUrl } : {}),
       });
       return;
     }
     reply({
       type: 'result',
-      message: `${job.op} 完成（注入 ${r.method}，回读校验通过）`,
+      message: newDocUrl
+        ? `已新建文档并写入内容（注入 ${r.method}，回读校验通过）：${newDocUrl}`
+        : `${job.op} 完成（注入 ${r.method}，回读校验通过）`,
+      ...(newDocUrl ? { url: newDocUrl } : {}),
     });
   } catch (err) {
     void track({ name: 'edit', url: '/edit/task', data: { ok: false, op: job.op } });
@@ -224,6 +248,68 @@ export async function runEditJob(job: EditJob, reply: Reply): Promise<void> {
         await chrome.tabs.remove(tabId);
       } catch {
         /* 标签页可能已被关闭 */
+      }
+    }
+  }
+}
+
+/**
+ * 在 job.url 所在租户页面上下文里新建一篇空 docx，返回新文档 { url, objToken }。
+ * job.url 只用来定位"在哪个租户/域名下建"，可传网盘首页或任意文档链接。
+ * 出错时已通过 reply 回传（need-auth / error），返回 null。
+ */
+async function createEmptyDoc(
+  job: EditJob,
+  reply: Reply
+): Promise<{ url: string; objToken: string } | null> {
+  let host: string;
+  try {
+    host = new URL(job.url).host;
+  } catch {
+    reply({
+      type: 'error',
+      subtype: 'edit_unsupported',
+      message: 'new-doc 需要一个该租户下的飞书页面链接（网盘首页或任意文档均可）',
+    });
+    return null;
+  }
+  if (!(await hasPermissionForHost(host))) {
+    reply({ type: 'need-auth', host });
+    return null;
+  }
+  reply({ type: 'progress', message: '正在新建空文档…', percent: 5 });
+  let tabId: number | undefined;
+  try {
+    const tab = await chrome.tabs.create({ url: job.url, active: false });
+    tabId = tab.id;
+    if (tabId == null) throw new Error('无法打开标签页');
+    await waitForTabComplete(tabId);
+    let injected = false;
+    let injectErr: unknown;
+    for (let i = 0; i < 3 && !injected; i++) {
+      try {
+        await chrome.scripting.executeScript({ target: { tabId }, files: ['content.js'] });
+        injected = true;
+      } catch (e) {
+        injectErr = e;
+        await new Promise((r) => setTimeout(r, 1500));
+        await waitForTabComplete(tabId);
+      }
+    }
+    if (!injected) {
+      throw new Error(
+        `内容脚本注入失败: ${injectErr instanceof Error ? injectErr.message : String(injectErr)}`
+      );
+    }
+    setContentTab(tabId);
+    return await createDocx({ name: job.anchor?.name });
+  } finally {
+    setContentTab(null);
+    if (tabId != null) {
+      try {
+        await chrome.tabs.remove(tabId);
+      } catch {
+        /* 标签页可能已关闭 */
       }
     }
   }

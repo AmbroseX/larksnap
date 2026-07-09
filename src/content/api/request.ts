@@ -60,11 +60,25 @@ export async function feishuGet<T = unknown>(path: string): Promise<T> {
   return res.json() as Promise<T>;
 }
 
-/** 单次 POST（指定 csrf cookie 名），返回解析后的 JSON 或文本 */
+/** 把对象编成 x-www-form-urlencoded 串（跳过 undefined 值） */
+function encodeForm(body: unknown): string {
+  const obj = (body ?? {}) as Record<string, unknown>;
+  return Object.entries(obj)
+    .filter(([, v]) => v !== undefined)
+    .map(([k, v]) => `${k}=${encodeURIComponent(String(v))}`)
+    .join('&');
+}
+
+/**
+ * 单次 POST（指定 csrf cookie 名），返回解析后的 JSON 或文本。
+ * form=true 时用 x-www-form-urlencoded 编码（explorer/create 一类接口只认表单，
+ * 发 JSON 会报 code:2 Parameter Error）；默认仍走 JSON。
+ */
 async function postOnce(
   path: string,
   body: unknown,
-  csrfName: string
+  csrfName: string,
+  form: boolean
 ): Promise<unknown> {
   const reqId = genReqId();
   const csrf = (await readCookie(csrfName)) ?? '';
@@ -76,14 +90,16 @@ async function postOnce(
     referrerPolicy: 'strict-origin-when-cross-origin',
     headers: {
       accept: 'application/json, text/plain, */*',
-      'content-type': 'application/json',
+      'content-type': form
+        ? 'application/x-www-form-urlencoded'
+        : 'application/json',
       'doc-biz': 'Lark',
       'request-id': reqId,
       'x-request-id': reqId,
       'x-tt-trace-id': reqId,
       'x-csrftoken': csrf,
     },
-    body: JSON.stringify(body),
+    body: form ? encodeForm(body) : JSON.stringify(body),
   });
   const text = await res.text();
   // 未登录时飞书返回纯文本 `403 csrf token error`，保留原文供上层判定
@@ -106,12 +122,13 @@ function isCsrfError(result: unknown): boolean {
 
 export async function feishuPost<T = unknown>(
   path: string,
-  body: unknown
+  body: unknown,
+  form = false
 ): Promise<T> {
   let last: unknown;
   // CSRF cookie 候选名逐个尝试：收到 csrf 错误就换名重试
   for (const name of CSRF_COOKIE_NAMES) {
-    last = await postOnce(path, body, name);
+    last = await postOnce(path, body, name, form);
     if (!isCsrfError(last)) return last as T;
   }
   return last as T;

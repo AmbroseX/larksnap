@@ -69,15 +69,19 @@ export async function feishuGet<T = unknown>(path: string): Promise<T> {
   });
 }
 
-/** POST 内部接口（经 content 同源代发，带 CSRF） */
+/**
+ * POST 内部接口（经 content 同源代发，带 CSRF）。
+ * opts.form=true 走表单编码（explorer/create 一类接口只认表单）。
+ */
 export async function feishuPost<T = unknown>(
   path: string,
-  body: unknown
+  body: unknown,
+  opts?: { form?: boolean }
 ): Promise<T> {
   const tabId = await activeContentTab();
   return send<T>(tabId, {
     type: CONTENT_MSG.FEISHU_REQUEST,
-    data: { method: 'POST', path, body },
+    data: { method: 'POST', path, body, form: opts?.form ?? false },
   });
 }
 

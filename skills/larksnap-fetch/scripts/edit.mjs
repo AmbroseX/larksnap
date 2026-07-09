@@ -5,6 +5,7 @@
 // 把内容粘贴进飞书编辑器，协同保存由飞书前端自己完成，我们不碰协同协议。
 //
 // 用法（写入内容一律走 md 文件，不走命令行参数，避免转义和长度问题）：
+//   node edit.mjs <链接> new-doc [<md文件>] --name "<标题>"   # 新建文档，<链接>只用来定位租户
 //   node edit.mjs <链接> append <md文件>
 //   node edit.mjs <链接> insert-after "<标题文本>" <md文件>
 //   node edit.mjs <链接> list-blocks                         # 只读，块清单 JSON 打到 stdout
@@ -65,7 +66,8 @@ const argv = process.argv.slice(2);
 
 // USAGE_HINT 必须先于解析循环定义：循环里遇到未知旗标就会调 usage()
 const USAGE_HINT = [
-  '用法: edit.mjs <链接> append <md文件>',
+  '用法: edit.mjs <链接> new-doc [<md文件>] --name "<标题>"',
+  '     edit.mjs <链接> append <md文件>',
   '     edit.mjs <链接> insert-after "<标题文本>" <md文件>',
   '     edit.mjs <链接> list-blocks',
   '     edit.mjs <链接> find-blocks "<关键词>" [--regex] [--type <类型前缀>] [--limit N]',
@@ -79,7 +81,7 @@ function usage(message) {
   fail({ type: 'usage', subtype: 'bad_args', message, hint: USAGE_HINT });
 }
 
-const FLAGS_WITH_VALUE = new Set(['--profile', '--expect', '--expect-first', '--type', '--limit']);
+const FLAGS_WITH_VALUE = new Set(['--profile', '--expect', '--expect-first', '--type', '--limit', '--name']);
 // 默认走纯文本 Markdown 口味粘贴（飞书自己解析转块：表格转原生简单表格而非
 // 异步提交的内嵌电子表格，代码块注释行也不会被误判成标题）。
 // --html-paste：退回 HTML 口味粘贴（万一某租户不支持 md 粘贴解析时用）。
@@ -107,6 +109,12 @@ if (!url || !op) usage('缺少参数：需要 <链接> 和 <操作>。');
 let anchor = null;
 let mdFile = null;
 switch (op) {
+  case 'new-doc':
+    // 新建文档：<链接> 只用来定位在哪个租户/域名下建（网盘首页或任意文档都行）。
+    // <md文件> 可选，作为新文档初始内容；不给就建一篇空文档。--name 设标题。
+    mdFile = positionals[2] || null;
+    anchor = flags['--name'] ? { name: flags['--name'] } : null;
+    break;
   case 'append':
     mdFile = positionals[2];
     if (!mdFile) usage('append 需要 <md文件>。');
@@ -407,6 +415,13 @@ function handleLine(msg) {
       return null;
     }
     case 'result': {
+      if (op === 'new-doc') {
+        // 新文档地址打到 stdout（JSON，供 CC 接着 fetch / 继续编辑）
+        console.log(
+          JSON.stringify({ ok: true, url: msg.url ?? null, message: msg.message ?? '' }, null, 2)
+        );
+        return 0;
+      }
       if (op === 'list-blocks') {
         // 块清单 JSON 打到 stdout（供 CC 解析定位目标块）
         console.log(JSON.stringify({ ok: true, blocks: msg.blocks || [] }, null, 2));

@@ -20,14 +20,18 @@ interface FeishuReq {
   method: 'GET' | 'POST';
   path: string;
   body?: unknown;
+  /** POST body 用表单编码（explorer/create 一类接口需要） */
+  form?: boolean;
 }
 
 async function handleAsync(msg: { type: string; data?: unknown }): Promise<unknown> {
   switch (msg.type) {
     case CONTENT_MSG.FEISHU_REQUEST: {
-      const { method, path, body } = msg.data as FeishuReq;
+      const { method, path, body, form } = msg.data as FeishuReq;
       const data =
-        method === 'POST' ? await feishuPost(path, body) : await feishuGet(path);
+        method === 'POST'
+          ? await feishuPost(path, body, form)
+          : await feishuGet(path);
       return { success: true, data };
     }
 
