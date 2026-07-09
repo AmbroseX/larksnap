@@ -38,11 +38,14 @@ export type ExportAction =
   | 'word'
   | 'pdf'
   | 'html'
+  | 'xhs'
+  | 'wechat'
   | 'attachments'
   | 'cache'
   | 'cacheList'
   | 'diagnostic'
-  | 'feedback';
+  | 'feedback'
+  | 'video';
 
 /** 单次导出任务的运行状态 */
 export type TaskStatus = 'idle' | 'running' | 'success' | 'error';
@@ -114,7 +117,8 @@ export type TrackEventName =
   | 'export'
   | 'webcopy'
   | 'bridge'
-  | 'edit';
+  | 'edit'
+  | 'video';
 
 /**
  * 一次统计事件。隐私红线：data 只允许枚举串 / 布尔 / 整数，
@@ -168,7 +172,12 @@ export interface InlineNode {
   bold?: boolean;
   italic?: boolean;
   strike?: boolean;
+  underline?: boolean;
   inlineCode?: boolean;
+  /** 文字颜色（CSS 色值；apool 里非 CSS 形态的值不透传） */
+  color?: string;
+  /** 背景高亮色（CSS 色值） */
+  background?: string;
   /** 链接 URL（存在则为链接） */
   link?: string;
   /** 行内公式的 LaTeX 源码（正文里只是占位符，渲染时用它替换） */
@@ -221,6 +230,19 @@ export interface MarkdownResult {
   images: MediaAsset[];
   /** 内嵌 sheet 块引用，exporter 取数后替换占位符 */
   sheetBlocks: EmbeddedSheetRef[];
+}
+
+// ==================== 视频下载（扩展 → daemon 反向任务） ====================
+
+/** 侧边栏「下载视频」入口的可用状态 */
+export interface VideoState {
+  /** 当前标签页是否为支持的视频站点 */
+  supported: boolean;
+  /** 命中的站点枚举名（bilibili/youtube/douyin/tiktok） */
+  site?: string;
+  /** 桥接就绪（daemon 已连且协议 >= v3）；false 时 reason 给引导文案 */
+  bridgeReady: boolean;
+  reason?: string;
 }
 
 /** 运行时状态（背景写入，UI 读取） */

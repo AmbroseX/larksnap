@@ -25,6 +25,8 @@ export const MSG = {
   EXPORT_PDF: 'export_pdf',
   EXPORT_HTML: 'export_html',
   EXPORT_ATTACHMENTS: 'export_attachments',
+  EXPORT_XHS: 'export_xhs',
+  EXPORT_WECHAT: 'export_wechat',
   // 缓存
   CACHE_DOC: 'cache_doc',
   CACHE_LIST: 'cache_list',
@@ -53,10 +55,22 @@ export const MSG = {
   WEBCOPY_GET_STATE: 'webcopy_get_state',
   /** 仅确保 webcopy 已注入当前标签页（自动复制开关生效用） */
   WEBCOPY_ENSURE: 'webcopy_ensure',
+  // 视频下载（经桥接交给本地 daemon 跑 yt-dlp）
+  DOWNLOAD_VIDEO: 'download_video',
+  /** 查询当前标签页是否支持视频下载 + 桥接是否就绪（决定侧边栏入口显隐） */
+  GET_VIDEO_STATE: 'get_video_state',
   // 标签页链接复制
   COPY_TABS: 'copy_tabs',
   // UI → SW：匿名统计事件（SW 统一收口上报）
   TRACK: 'track',
+} as const;
+
+/** SW ⇄ offscreen 页的消息类型（小红书卡片渲染，§六） */
+export const OFFSCREEN_MSG = {
+  /** SW → offscreen：渲染请求，data 为 XhsRenderRequest，响应带 XhsRenderResult */
+  XHS_RENDER: 'offscreen_xhs_render',
+  /** offscreen → SW：单张卡片渲染进度（fire-and-forget） */
+  XHS_PROGRESS: 'offscreen_xhs_progress',
 } as const;
 
 /** content script 内部消息类型（背景 → content） */
@@ -88,6 +102,17 @@ export const FEISHU_TOKEN_RE = /^[A-Za-z0-9]{16,}$/;
 
 /** 飞书文档支持的域名后缀 */
 export const FEISHU_HOSTS = ['feishu.cn', 'feishu.net', 'larksuite.com'];
+
+/**
+ * 支持视频下载的站点（第一层：整页 URL 交给 daemon 的 yt-dlp 提取）。
+ * site 是统计用的枚举名（隐私红线：只上报枚举，不上报真实 URL）。
+ */
+export const VIDEO_SITES: ReadonlyArray<{ site: string; hosts: string[] }> = [
+  { site: 'bilibili', hosts: ['bilibili.com', 'b23.tv'] },
+  { site: 'youtube', hosts: ['youtube.com', 'youtu.be'] },
+  { site: 'douyin', hosts: ['douyin.com'] },
+  { site: 'tiktok', hosts: ['tiktok.com'] },
+];
 
 /** 匿名统计（Umami 自建实例）。上报内容见 src/background/analytics.ts 白名单 */
 export const UMAMI_HOST = 'https://umami.youmiai.ai';

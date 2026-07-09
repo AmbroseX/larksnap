@@ -1,5 +1,5 @@
 import type { DocInfo, Message, Response, TrackEvent } from '../shared/types';
-import { MSG } from '../shared/constants';
+import { MSG, OFFSCREEN_MSG } from '../shared/constants';
 import { getRuntimeState } from '../shared/storage';
 import { detectActiveDoc } from './doc-detect';
 import { getSnapshot } from './feishu-proxy';
@@ -9,11 +9,15 @@ import { exportSheet } from './exporters/sheet';
 import { exportPdf } from './exporters/pdf';
 import { exportHtml } from './exporters/html';
 import { exportAttachments } from './exporters/attachments';
+import { exportXhs } from './exporters/xhs';
+import { exportWechat } from './exporters/wechat';
+import type { XhsRenderProgress } from './xhs/types';
 import { cacheDoc, listCache, removeCache, getCache } from './cache-manager';
 import { exportDiagnostic } from './diagnostic';
 import { getCookie } from './cookie';
 import { hasPermissionForHost, recordTrusted, revokePermission, listTrusted } from './permissions';
 import { startBridge, getBridgeStatus } from './bridge';
+import { getVideoState, downloadVideo } from './video';
 import { track, initAnalytics } from './analytics';
 import {
   setupWebcopy,
@@ -131,6 +135,36 @@ async function handleMessage(
       return err ?? blockSheetOnly(doc!) ?? trackedExport('html', () => exportHtml(doc!));
     }
 
+    case MSG.EXPORT_XHS: {
+      const doc = await detectActiveDoc();
+      const err = requireReady(doc);
+      const { themeId } = (message.data || {}) as { themeId?: string };
+      return err ?? blockSheetOnly(doc!) ?? trackedExport('xhs', () => exportXhs(doc!, themeId));
+    }
+
+    case MSG.EXPORT_WECHAT: {
+      const doc = await detectActiveDoc();
+      const err = requireReady(doc);
+      const { themeId } = (message.data || {}) as { themeId?: string };
+      return (
+        err ?? blockSheetOnly(doc!) ?? trackedExport('wechat', () => exportWechat(doc!, themeId))
+      );
+    }
+
+    // offscreen 页逐张卡片的渲染进度，转成统一进度推给侧边栏
+    case OFFSCREEN_MSG.XHS_PROGRESS: {
+      const { done, total } = (message.data ?? {}) as XhsRenderProgress;
+      if (done && total) {
+        await reportProgress(
+          'xhs',
+          'running',
+          `正在生成卡片 ${done}/${total}...`,
+          45 + Math.round((done / total) * 50)
+        );
+      }
+      return { success: true };
+    }
+
     case MSG.EXPORT_ATTACHMENTS: {
       const doc = await detectActiveDoc();
       const err = requireReady(doc);
@@ -168,6 +202,14 @@ async function handleMessage(
     case MSG.EXPORT_DIAGNOSTIC: {
       const doc = await detectActiveDoc();
       return exportDiagnostic(doc);
+    }
+
+    // ---------- 视频下载（daemon 跑 yt-dlp） ----------
+    case MSG.GET_VIDEO_STATE: {
+      return getVideoState();
+    }
+    case MSG.DOWNLOAD_VIDEO: {
+      return downloadVideo();
     }
 
     // ---------- 网页复制（webcopy） ----------
