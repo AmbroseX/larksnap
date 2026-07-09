@@ -1,4 +1,9 @@
 import { MSG } from '../shared/constants';
+import {
+  XHS_THEME_OPTIONS,
+  WECHAT_THEME_OPTIONS,
+  type ThemeOption,
+} from '../shared/themes';
 
 /** 侧边栏一个操作卡片的配置 */
 export interface ActionItem {
@@ -14,6 +19,8 @@ export interface ActionItem {
   disabled?: boolean;
   /** 前端动作：'cacheList' 切到缓存列表视图，'feedback' 打开反馈页 */
   clientAction?: 'cacheList' | 'feedback';
+  /** 有样式可选的导出：点卡片先展开选择器，点样式再执行 */
+  themes?: ThemeOption[];
 }
 
 /** 与 PRD 一致的操作清单 */
@@ -41,6 +48,20 @@ export const ACTIONS: ActionItem[] = [
     title: '导出为 HTML',
     subtitle: '下载完整网页文件',
     msg: MSG.EXPORT_HTML,
+  },
+  {
+    key: 'xhs',
+    title: '导出为小红书卡片',
+    subtitle: '生成竖版图文卡片 PNG 压缩包',
+    msg: MSG.EXPORT_XHS,
+    themes: XHS_THEME_OPTIONS,
+  },
+  {
+    key: 'wechat',
+    title: '复制为公众号格式',
+    subtitle: '复制后去公众号编辑器直接粘贴',
+    msg: MSG.EXPORT_WECHAT,
+    themes: WECHAT_THEME_OPTIONS,
   },
   {
     key: 'attachments',

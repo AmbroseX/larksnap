@@ -42,14 +42,27 @@ function makeNode(
     if (key.includes('bold')) node.bold = true;
     else if (key.includes('italic')) node.italic = true;
     else if (key.includes('strike')) node.strike = true;
+    else if (key.includes('underline')) node.underline = true;
     else if (key.includes('inline') && key.includes('code')) node.inlineCode = true;
     else if (key === 'code' || key.includes('codeinline')) node.inlineCode = true;
     else if (key.includes('equation')) node.equation = val;
     else if (key.includes('link') || key.includes('href') || key.includes('url')) {
       node.link = decodeLinkValue(val);
     }
+    // 颜色/高亮：只透传 CSS 形态的值（部署间可能是枚举号，认不出就忽略，别渲染错色）
+    // ⚠️ background 要先判：key 可能同时含 background 和 color（如 text-background-color）
+    else if ((key.includes('background') || key.includes('highlight')) && isCssColor(val)) {
+      node.background = val;
+    } else if (key.includes('color') && isCssColor(val)) {
+      node.color = val;
+    }
   }
   return node;
+}
+
+/** 值是否已是 CSS 色值（#hex / rgb / hsl），枚举号等其他形态不透传 */
+function isCssColor(val: string): boolean {
+  return /^(#[0-9a-f]{3,8}|rgba?\(|hsla?\()/i.test((val || '').trim());
 }
 
 /** 链接值可能是 URL、JSON 或被编码，尽力还原为可用 URL */
@@ -141,6 +154,9 @@ function mergeAdjacent(nodes: InlineNode[]): InlineNode[] {
       last.bold === n.bold &&
       last.italic === n.italic &&
       last.strike === n.strike &&
+      last.underline === n.underline &&
+      last.color === n.color &&
+      last.background === n.background &&
       last.inlineCode === n.inlineCode
     ) {
       last.text += n.text;

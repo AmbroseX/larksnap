@@ -2,10 +2,10 @@ import type { DocInfo, Response } from '../../shared/types';
 import { marked } from 'marked';
 import { reportProgress } from '../progress';
 import { resolveObjToken, fetchClientVars } from '../feishu-api';
-import { downloadMedia } from '../feishu-proxy';
 import { blocksToMarkdown } from '../convert/markdown';
 import { downloadDataUrl, safeName } from '../download';
-import { mediaDownloadUrls, onlineMediaUrl, mapWithConcurrency } from '../media-util';
+import { onlineMediaUrl } from '../media-util';
+import { downloadImageDataUrls } from '../image-map';
 
 /**
  * 导出为 HTML —— **从 client_vars 自渲染**（与 Markdown 同源），而非 DOM 快照。
@@ -37,33 +37,18 @@ export async function exportHtml(doc: DocInfo): Promise<Response> {
     const urlMap: Record<string, string> = {};
     if (images.length) {
       await reportProgress('html', 'running', `正在下载 ${images.length} 张图片...`);
-      const results = await mapWithConcurrency(
-        images,
-        3,
-        async (img) => {
-          const blob = await downloadMedia(
-            mediaDownloadUrls(doc.host, img.token, img.mountToken, {
-              isImage: true,
-              width: img.width,
-              height: img.height,
-            })
-          );
-          return { img, blob };
-        },
-        (d, total) =>
-          reportProgress(
-            'html',
-            'running',
-            `正在下载图片 ${d}/${total}...`,
-            Math.round((d / total) * 95)
-          )
+      const dataUrls = await downloadImageDataUrls(doc.host, images, (d, total) =>
+        reportProgress(
+          'html',
+          'running',
+          `正在下载图片 ${d}/${total}...`,
+          Math.round((d / total) * 95)
+        )
       );
-      for (let i = 0; i < images.length; i++) {
-        const r = results[i];
-        const img = images[i];
-        urlMap[img.token] = r
-          ? `data:${r.blob.mimeType || img.mimeType || 'image/png'};base64,${r.blob.base64}`
-          : onlineMediaUrl(doc.host, img.token, img.mountToken, img.width, img.height);
+      for (const img of images) {
+        urlMap[img.token] =
+          dataUrls[img.token] ??
+          onlineMediaUrl(doc.host, img.token, img.mountToken, img.width, img.height);
       }
     }
 

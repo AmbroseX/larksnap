@@ -157,6 +157,7 @@ export default defineConfig(({ mode }) => {
           popup: resolve(__dirname, 'popup.html'),
           options: resolve(__dirname, 'options.html'),
           sidepanel: resolve(__dirname, 'sidepanel.html'),
+          offscreen: resolve(__dirname, 'offscreen.html'),
         },
         output: {
           entryFileNames: (chunkInfo) => {

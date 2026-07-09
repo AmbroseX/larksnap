@@ -417,3 +417,360 @@ body {
   cursor: pointer;
   font-size: 12px;
 }
+
+/* ---------- 导出样式选择器（小红书 / 公众号） ---------- */
+.action-group {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.theme-picker {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 2px 4px 0;
+}
+
+.theme-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid var(--border);
+  background: var(--card);
+  border-radius: 999px;
+  padding: 5px 12px;
+  font-size: 12px;
+  color: var(--text);
+  cursor: pointer;
+  font-family: inherit;
+  box-shadow: var(--shadow);
+  transition: border-color 0.15s, background 0.15s;
+}
+
+.theme-chip:hover:not(:disabled) {
+  border-color: var(--accent);
+}
+
+.theme-chip.selected {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.theme-chip:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.theme-swatch {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  border: 1px solid rgba(0, 0, 0, 0.15);
+}
+
+/* ---------- 小红书卡片预览 ---------- */
+.preview-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  padding: 8px 12px 12px;
+}
+
+.preview-cell {
+  margin: 0;
+  position: relative;
+  border-radius: 8px;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  background: var(--card);
+  box-shadow: var(--shadow);
+}
+
+.preview-cell img {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
+.preview-cell figcaption {
+  position: absolute;
+  right: 6px;
+  bottom: 6px;
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.55);
+  color: #fff;
+  font-size: 11px;
+}
+
+.preview-actions {
+  position: sticky;
+  bottom: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 10px 12px 14px;
+  background: var(--bg);
+  border-top: 1px solid var(--border);
+}
+
+.preview-download {
+  flex: 1;
+  border: none;
+  border-radius: 8px;
+  padding: 10px 12px;
+  background: var(--accent);
+  color: #fff;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  font-family: inherit;
+}
+
+.preview-download:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.preview-cancel {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px 14px;
+  background: var(--card);
+  color: var(--text);
+  font-size: 13px;
+  cursor: pointer;
+  font-family: inherit;
+}
+
+.preview-cancel:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.preview-note {
+  width: 100%;
+  margin: 2px 0 0;
+  font-size: 12px;
+  color: var(--text-sub);
+}
+
+/* ---------- 预览：多选与放大 ---------- */
+.preview-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 8px;
+}
+
+.preview-selectall {
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 3px 12px;
+  background: var(--card);
+  color: var(--text);
+  font-size: 12px;
+  cursor: pointer;
+  font-family: inherit;
+}
+
+.preview-selectall:hover {
+  border-color: var(--accent);
+}
+
+.preview-count {
+  font-size: 12px;
+  color: var(--text-sub);
+}
+
+.preview-cell img {
+  cursor: zoom-in;
+}
+
+.preview-cell.unselected img {
+  opacity: 0.35;
+}
+
+.preview-check {
+  position: absolute;
+  left: 6px;
+  top: 6px;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  border: 1.5px solid rgba(0, 0, 0, 0.35);
+  background: rgba(255, 255, 255, 0.9);
+  color: transparent;
+  font-size: 13px;
+  line-height: 1;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+}
+
+.preview-check.on {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+
+/* ---------- 放大查看（lightbox） ---------- */
+.lightbox {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  background: rgba(0, 0, 0, 0.72);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* 图片容器：适应模式居中；原始尺寸模式变滚动区，可拖动查看细节 */
+.lightbox-scroll {
+  position: absolute;
+  /* 底部给悬浮操作条留出空间 */
+  inset: 0 0 56px 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+}
+
+.lightbox-scroll.fill {
+  display: block;
+  overflow: auto;
+}
+
+.lightbox-img {
+  max-width: 96%;
+  max-height: 96%;
+  border-radius: 10px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+  cursor: zoom-in;
+}
+
+/* 原始尺寸：不设上限（1080 宽），横竖滚动查看 */
+.lightbox-img.fill {
+  max-width: none;
+  max-height: none;
+  border-radius: 0;
+  cursor: zoom-out;
+  display: block;
+  margin: 0 auto;
+}
+
+.lightbox-nav {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 34px;
+  height: 34px;
+  border: none;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.85);
+  color: #333;
+  font-size: 20px;
+  line-height: 1;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 0 2px;
+}
+
+.lightbox-nav.prev {
+  left: 8px;
+}
+
+.lightbox-nav.next {
+  right: 8px;
+}
+
+.lightbox-bar {
+  position: absolute;
+  left: 50%;
+  bottom: 14px;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 7px 14px;
+  border-radius: 999px;
+  background: rgba(20, 20, 24, 0.85);
+  color: #fff;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.lightbox-select {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+}
+
+.lightbox-select input {
+  accent-color: var(--accent);
+  margin: 0;
+}
+
+.lightbox-page {
+  color: rgba(255, 255, 255, 0.7);
+}
+
+.lightbox-open {
+  border: 1px solid rgba(255, 255, 255, 0.4);
+  border-radius: 999px;
+  background: none;
+  color: #fff;
+  font-size: 12px;
+  cursor: pointer;
+  padding: 2px 10px;
+  font-family: inherit;
+}
+
+.lightbox-open:hover {
+  background: rgba(255, 255, 255, 0.15);
+}
+
+.lightbox-close {
+  border: none;
+  background: none;
+  color: #fff;
+  font-size: 13px;
+  cursor: pointer;
+  padding: 0;
+}
+
+/* ---------- 公众号样式悬浮预览 ---------- */
+.wtp {
+  margin: 0 4px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: #fff;
+  box-shadow: var(--shadow);
+}
+
+.wtp-heading {
+  font-size: 14px;
+  font-weight: 700;
+  line-height: 1.4;
+}
+
+.wtp-body {
+  margin: 6px 0;
+  font-size: 12px;
+  line-height: 1.6;
+  color: rgba(0, 0, 0, 0.75);
+}
+
+.wtp-quote {
+  padding: 3px 8px;
+  background: #f9f9f9;
+  color: rgba(0, 0, 0, 0.55);
+  font-size: 12px;
+}

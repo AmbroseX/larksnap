@@ -64,6 +64,10 @@ function readExtra(entry: RawEntry, type: string): Record<string, unknown> {
     extra.level = m ? Number(m[1]) : 1;
   }
   if (type === 'todo' || data.done != null) extra.done = Boolean(data.done);
+  // 分栏列宽比例（grid_column），公众号渲染按比例分 flex 宽
+  if (type === 'grid_column' && data.width_ratio != null) {
+    extra.widthRatio = Number(data.width_ratio) || 0;
+  }
   return extra;
 }
 
