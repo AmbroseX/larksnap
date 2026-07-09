@@ -1,6 +1,7 @@
 import { useEffect, useState, useCallback } from 'react';
 import type {
   Response,
+  VideoState,
   WebCopyConfig,
   WebCopyMdResult,
   WebCopyNeedsPermission,
@@ -68,12 +69,19 @@ export function WebCopyView() {
   const [webcopyCfg, setWebcopyCfg] = useState<WebCopyConfig>(DEFAULT_CONFIG.webcopy);
   /** 剪贴板写入失败时展示结果，让用户手动复制 */
   const [preview, setPreview] = useState<string | null>(null);
+  /** 当前页是视频站点时非 null（含桥接就绪与否） */
+  const [video, setVideo] = useState<VideoState | null>(null);
+  /** 下载可能持续几分钟，用独立 busy，不锁其他按钮 */
+  const [videoBusy, setVideoBusy] = useState(false);
 
   useEffect(() => {
     getConfig().then((cfg) => setWebcopyCfg(cfg.webcopy));
     // 只查状态不注入，保持零侵入
     sendToBackground<WebCopyState>(MSG.WEBCOPY_GET_STATE).then((res) => {
       if (res.success && res.data) setUnlocked(res.data.unlocked);
+    });
+    sendToBackground<VideoState>(MSG.GET_VIDEO_STATE).then((res) => {
+      if (res.success && res.data?.supported) setVideo(res.data);
     });
   }, []);
 
@@ -201,6 +209,26 @@ export function WebCopyView() {
       );
     });
 
+  /** 下载视频：任务在本地 daemon 跑 yt-dlp，进度显示在底部状态栏（PROGRESS 推送） */
+  const handleDownloadVideo = async () => {
+    if (videoBusy) return;
+    setVideoBusy(true);
+    setStatusKind('idle');
+    setStatus('正在发起视频下载，进度见底部状态栏…');
+    try {
+      const res = await sendToBackground<{ file?: string }>(MSG.DOWNLOAD_VIDEO);
+      if (res.success) {
+        report(true, res.data?.file ? `视频已保存：${res.data.file}` : '视频下载完成');
+      } else {
+        report(false, res.error || '下载失败');
+      }
+    } catch (e) {
+      report(false, e instanceof Error ? e.message : String(e));
+    } finally {
+      setVideoBusy(false);
+    }
+  };
+
   const handleToggleAutoCopy = () =>
     run('autocopy', async () => {
       const next = { ...webcopyCfg, autoCopyEnabled: !webcopyCfg.autoCopyEnabled };
@@ -222,6 +250,26 @@ export function WebCopyView() {
 
   return (
     <div className="webcopy">
+      {video?.supported && (
+        <div className="wc-card">
+          <div className="wc-card-title">下载视频</div>
+          <div className="wc-btn-row">
+            <button
+              className="wc-btn primary"
+              disabled={videoBusy || !video.bridgeReady}
+              onClick={handleDownloadVideo}
+            >
+              {videoBusy ? '下载中…' : '下载当前视频'}
+            </button>
+          </div>
+          <div className="wc-row-sub">
+            {video.bridgeReady
+              ? '由本地 yt-dlp 下载到「下载/larksnap-video」文件夹'
+              : video.reason || '本地 daemon 未就绪'}
+          </div>
+        </div>
+      )}
+
       <div className="wc-card">
         <div className="wc-card-title">整页转 Markdown</div>
         <div className="wc-btn-row">

@@ -4,6 +4,9 @@
 //   CLI  ──POST /command（流式 NDJSON 响应）──▶ daemon ──WS──▶ 扩展
 //   扩展 ──WS(progress/result/...)──▶ daemon ──写回 /command 流──▶ CLI
 //
+// v3 起还有一条反向任务链路（视频下载，扩展发起、daemon 本机执行，不经 CLI）：
+//   扩展 ──WS video-job──▶ daemon 起 yt-dlp ──WS video-progress/result/error──▶ 扩展
+//
 // 多浏览器 profile：每个扩展安装有自己的 profile code(contextId)，hello 时上报；
 // daemon 按 contextId 维护连接，CLI 可用 --profile 指定路由（仿 OpenCLI）。
 //
@@ -25,6 +28,7 @@ import {
   loadOrCreateSecret,
   verifySigHeader,
 } from './protocol.mjs';
+import { runVideoJob } from './video.mjs';
 
 ensureHomeDir();
 const SECRET = loadOrCreateSecret();
@@ -275,6 +279,20 @@ attachWsServer(httpServer, {
         log('extension hello', cid, msg.version || '', `proto=${extProto ?? '(旧扩展未报)'}`);
         return;
       }
+      // 扩展发起的视频下载任务（v3 反向链路）：daemon 自己起 yt-dlp，进度主动推回本连接。
+      // 只接受已 hello 的连接；参数校验/白名单在 video.mjs 里收口（这条 WS 无签名，不能信任内容）。
+      if (msg.type === 'video-job') {
+        if (!conn._contextId || (conn._proto ?? 0) < 3 || msg.id == null) return;
+        const vid = String(msg.id);
+        log('video job', vid, conn._contextId);
+        void runVideoJob({ ...msg, id: vid }, (obj) => conn.send(JSON.stringify(obj)), log, () => {
+          conn._videoJobs?.delete(vid);
+          armIdle();
+        }).then((handle) => {
+          if (handle) (conn._videoJobs ??= new Map()).set(vid, handle);
+        });
+        return;
+      }
       // 业务消息（progress/result/error/need-login/need-auth），按 id 写回 CLI 流
       const entry = msg.id != null ? pending.get(msg.id) : null;
       if (!entry) return;
@@ -299,6 +317,11 @@ attachWsServer(httpServer, {
       clearInterval(hb);
       const cid = conn._contextId;
       if (cid && extConns.get(cid) === conn) extConns.delete(cid);
+      // 发起方断开 → 在跑的 yt-dlp 没人收进度了，直接杀掉（半成品 .part 文件支持 -c 续传）
+      if (conn._videoJobs) {
+        for (const handle of conn._videoJobs.values()) handle.kill();
+        conn._videoJobs.clear();
+      }
       log('extension disconnected', cid || '(未 hello)');
       // 该 profile 的在途任务收尾报错
       for (const [id, entry] of pending) {

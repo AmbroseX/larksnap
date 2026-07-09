@@ -58,6 +58,14 @@
 | 选中文字自动复制 | 选中即进剪贴板，阈值和格式可在设置页调 |
 | 复制标签页链接 | 当前页或全部标签页，支持 Markdown 链接等四种格式 |
 
+### 下载网页视频（B 站 / YouTube / 抖音 / TikTok）
+
+在支持的视频页打开侧边栏，点「下载当前视频」：扩展把页面地址交给本地 daemon，由本机的
+`yt-dlp` 下载合并，落到 `~/Downloads/larksnap-video/`，进度实时显示在侧边栏底部。
+
+前提：装好 larksnap-fetch 技能（daemon 随技能分发，见下节）并跑过一次让 daemon 拉起，
+本机装有 `yt-dlp` 和 `ffmpeg`（macOS：`brew install yt-dlp ffmpeg`）。
+
 ### 在 Claude Code 里用（larksnap-fetch 技能）
 
 装好扩展后，再装一个技能，就能在 Claude Code 里贴飞书链接直接下载到本地：

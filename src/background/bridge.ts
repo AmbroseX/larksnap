@@ -31,7 +31,8 @@ const WS_URL = `ws://127.0.0.1:${PORT}/ext`;
 // 需与 skills/larksnap-fetch/scripts/bridge/protocol.mjs 的 PROTOCOL_VERSION 一致；
 // welcome 里对不上时置 protocolMismatch 提示用户更新（不硬断，避免升级期间全瘫）。
 // v2: 支持编辑任务（kind='edit'，daemon 只对 proto>=2 的扩展派发编辑任务）
-const PROTOCOL_VERSION = 2;
+// v3: 扩展可主动发起视频下载（video-job），daemon 本机跑 yt-dlp 并主动推进度回来
+const PROTOCOL_VERSION = 3;
 const KEEPALIVE_ALARM = 'larksnap-bridge-keepalive';
 const RECONNECT_BASE = 2000;
 const RECONNECT_MAX = 5000;
@@ -41,8 +42,40 @@ let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 let reconnectAttempts = 0;
 let connecting = false;
 let daemonVersion: string | null = null;
+let daemonProtocol: number | null = null; // welcome 里 daemon 报的协议版本（能力协商用）
 let protocolMismatch = false; // daemon 协议版本与本扩展不一致（提示更新 skill/扩展）
 let contextId: string | null = null;
+
+// ---- 视频下载（扩展发起的反向任务）----
+
+/** daemon 推回来的视频任务事件 */
+export interface VideoJobEvent {
+  type: 'video-progress' | 'video-result' | 'video-error';
+  id: string;
+  percent?: number;
+  message?: string;
+  /** video-result：落盘文件的绝对路径 */
+  file?: string;
+  /** video-error：错误细分（dependency_missing / busy / bad_request） */
+  subtype?: string;
+}
+
+/** 发给 daemon 的视频任务参数 */
+export interface VideoJobRequest {
+  url: string;
+  headers?: Record<string, string>;
+  cookies?: Array<{
+    domain: string;
+    path: string;
+    name: string;
+    value: string;
+    secure: boolean;
+    expires: number;
+  }>;
+}
+
+let videoSeq = 0;
+const videoPending = new Map<string, (ev: VideoJobEvent) => void>();
 
 const CONTEXT_ID_KEY = 'larksnap:bridge:context-id';
 
@@ -82,6 +115,7 @@ export async function getBridgeStatus(): Promise<{
   connected: boolean;
   reconnecting: boolean;
   daemonVersion: string | null;
+  daemonProtocol: number | null;
   protocolMismatch: boolean;
   contextId: string;
   extensionVersion: string;
@@ -90,10 +124,52 @@ export async function getBridgeStatus(): Promise<{
     connected: ws?.readyState === WebSocket.OPEN,
     reconnecting: reconnectTimer != null,
     daemonVersion,
+    daemonProtocol,
     protocolMismatch,
     contextId: await getContextId(),
     extensionVersion: chrome.runtime.getManifest().version,
   };
+}
+
+/**
+ * 视频下载链路是否可用。不可用时给出面向用户的原因（sidepanel 直接展示）。
+ * daemon <v3 不认识 video-job（会静默丢弃），所以必须在这里挡住。
+ */
+export function videoBridgeReady(): { ok: boolean; reason?: string } {
+  if (ws?.readyState !== WebSocket.OPEN) {
+    return {
+      ok: false,
+      reason: '本地 daemon 未连接：请先在终端跑一次 larksnap-fetch 技能把 daemon 拉起',
+    };
+  }
+  if ((daemonProtocol ?? 0) < 3) {
+    return { ok: false, reason: 'daemon 版本过旧，不支持视频下载：请更新 larksnap-fetch 技能后重启 daemon' };
+  }
+  return { ok: true };
+}
+
+/**
+ * 发起视频下载：经 WS 把任务交给 daemon（本机跑 yt-dlp），事件经 onEvent 回调。
+ * video-result / video-error 后自动清理。调用前须先过 videoBridgeReady()。
+ */
+export function requestVideoDownload(req: VideoJobRequest, onEvent: (ev: VideoJobEvent) => void): void {
+  const ready = videoBridgeReady();
+  if (!ready.ok || !ws) throw new Error(ready.reason || '桥接未就绪');
+  const id = `v${++videoSeq}-${Date.now().toString(36)}`;
+  videoPending.set(id, onEvent);
+  ws.send(JSON.stringify({ type: 'video-job', id, url: req.url, headers: req.headers, cookies: req.cookies }));
+}
+
+/** 连接断开时收尾所有在途视频任务（daemon 侧也会杀掉对应 yt-dlp）。 */
+function flushVideoPending(message: string): void {
+  for (const [id, cb] of videoPending) {
+    videoPending.delete(id);
+    try {
+      cb({ type: 'video-error', id, message });
+    } catch {
+      /* 回调异常不影响其他任务收尾 */
+    }
+  }
 }
 
 /** SW 启动时调用：建立连接 + alarms 保活。 */
@@ -152,7 +228,9 @@ async function connect(): Promise<void> {
       if (ws === sock) {
         ws = null;
         daemonVersion = null;
+        daemonProtocol = null;
         protocolMismatch = false;
+        flushVideoPending('与本地 daemon 的连接断开，下载已中止（重试可断点续传）');
       }
       scheduleReconnect();
     };
@@ -197,6 +275,8 @@ interface HostMessage {
     regex?: boolean;
     typeFilter?: string;
     limit?: number;
+    // new-doc 的新建标题搭 anchor 便车
+    name?: string;
   };
 }
 
@@ -210,6 +290,7 @@ async function onMessage(raw: string): Promise<void> {
   if (msg.type === 'welcome') {
     const w = msg as { daemonVersion?: string; protocolVersion?: number };
     daemonVersion = w.daemonVersion ?? null;
+    daemonProtocol = w.protocolVersion ?? null;
     // 旧 daemon 不回 protocolVersion → 也视为不一致（提示更新 skill）
     protocolMismatch = w.protocolVersion !== PROTOCOL_VERSION;
     if (protocolMismatch) {
@@ -217,6 +298,15 @@ async function onMessage(raw: string): Promise<void> {
         `[larksnap] 桥接协议版本不一致（扩展 v${PROTOCOL_VERSION} / daemon ${w.protocolVersion ?? '未知'}），请更新 larksnap-fetch 技能或重新构建扩展`
       );
     }
+    return;
+  }
+  // daemon 主动推回的视频任务事件（进度/结果/错误）→ 路由给发起方回调
+  if (msg.type === 'video-progress' || msg.type === 'video-result' || msg.type === 'video-error') {
+    const ev = msg as unknown as VideoJobEvent;
+    const cb = videoPending.get(ev.id);
+    if (!cb) return;
+    if (ev.type !== 'video-progress') videoPending.delete(ev.id);
+    cb(ev);
     return;
   }
   if (msg.type === 'job' && msg.id && msg.url) {

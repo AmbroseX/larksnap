@@ -17,8 +17,8 @@ import fs from 'node:fs';
 import crypto from 'node:crypto';
 import { EventEmitter } from 'node:events';
 
-export const DAEMON_VERSION = '1.3.0'; // 1.2.0: HMAC 签名 + 协议版本握手 + PID；1.3.0: 编辑任务（kind/op/contentMd/anchor 透传）
-export const PROTOCOL_VERSION = 2; // WS 握手用：hello/welcome 双向携带，不匹配时提示更新。v2: job 支持 kind='edit'
+export const DAEMON_VERSION = '1.4.0'; // 1.3.0: 编辑任务；1.4.0: 扩展发起的视频下载任务（daemon 本机跑 yt-dlp）
+export const PROTOCOL_VERSION = 3; // WS 握手用：hello/welcome 双向携带，不匹配时提示更新。v2: kind='edit'；v3: 扩展可主动发 video-job，daemon 主动推进度
 export const HOST = '127.0.0.1';
 export const PORT = Number(process.env.LARKSNAP_PORT || 19925);
 export const PING_URL = `http://${HOST}:${PORT}/ping`;
