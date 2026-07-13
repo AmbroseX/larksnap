@@ -26,6 +26,7 @@ import {
   downloadVideo,
   listVideoTasks,
   clearVideoTasks,
+  revealVideoTask,
 } from './video';
 import { track, initAnalytics } from './analytics';
 import {
@@ -268,6 +269,10 @@ async function handleMessage(
     }
     case MSG.CLEAR_VIDEO_TASKS: {
       return clearVideoTasks();
+    }
+    case MSG.REVEAL_VIDEO_FILE: {
+      const { taskId } = (message.data || {}) as { taskId?: string };
+      return revealVideoTask(taskId);
     }
 
     // ---------- 网页复制（webcopy） ----------

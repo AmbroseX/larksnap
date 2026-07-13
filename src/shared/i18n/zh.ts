@@ -216,6 +216,8 @@ export const zh = {
       queued: '已加入下载队列',
       tasksTitle: '下载任务',
       clearDone: '清除已结束',
+      openFolder: '打开下载目录',
+      revealFile: '打开文件夹',
       statusQueued: '排队中',
       statusRunning: '下载中',
       statusSuccess: '完成',

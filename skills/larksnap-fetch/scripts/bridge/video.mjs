@@ -423,6 +423,49 @@ export async function runVideoJob(msg, send, log, onDone) {
 const execFileP = promisify(execFile);
 
 /**
+ * 在系统文件管理器里显示下载产物（macOS 访达 / Windows 资源管理器 / Linux 文件管理器）。
+ * 只认落在 OUT_DIR 里且真实存在的文件（这条 WS 无签名，路径不能全信）；
+ * 文件无效或没传就退化为打开下载根目录。回 { type:'video-reveal-result', id, ok }。
+ */
+export function revealVideoPath(msg, send, log) {
+  const id = msg.id;
+  let target = OUT_DIR;
+  let selectFile = false;
+  if (typeof msg.file === 'string' && msg.file) {
+    try {
+      const p = path.resolve(msg.file);
+      if (p.startsWith(OUT_DIR + path.sep) && fs.statSync(p).isFile()) {
+        target = p;
+        selectFile = true;
+      }
+    } catch {
+      /* 文件不存在 → 开根目录 */
+    }
+  }
+  try {
+    fs.mkdirSync(OUT_DIR, { recursive: true });
+  } catch {
+    /* 目录建不出来也交给系统命令去报 */
+  }
+  const [cmd, args] =
+    process.platform === 'darwin'
+      ? selectFile
+        ? ['open', ['-R', target]]
+        : ['open', [target]]
+      : process.platform === 'win32'
+        ? selectFile
+          ? ['explorer', ['/select,' + target]]
+          : ['explorer', [target]]
+        : ['xdg-open', [selectFile ? path.dirname(target) : target]];
+  execFile(cmd, args, { timeout: 10_000 }, (err) => {
+    // Windows 的 explorer 成功也常返回非零退出码，不能当失败
+    const ok = !err || process.platform === 'win32';
+    if (!ok) log('video reveal fail', id, String(err.message).slice(0, 120));
+    send({ type: 'video-reveal-result', id, ok });
+  });
+}
+
+/**
  * 探测视频可用清晰度：yt-dlp -J 拉格式列表，按（分辨率, 帧率档）去重后回传。
  * 带和下载相同的 headers/cookies，所以结果如实反映登录态（没登录 B 站就列不出 1080P+）。
  * 成功推 { type:'video-probe-result', id, title, options:[{height,fps}] }（fps 只分 60/null 两档）。

@@ -233,6 +233,16 @@ export function requestVideoProbe(
   });
 }
 
+/**
+ * 让 daemon 在系统文件管理器里显示下载产物；file 缺省或已被移走时打开下载根目录。
+ * 发出去不等回（daemon 侧校验路径并回 video-reveal-result，这里不关心）。
+ */
+export function requestVideoReveal(file?: string): void {
+  const ready = videoBridgeReady();
+  if (!ready.ok || !ws) throw new Error(ready.reason || '桥接未就绪');
+  ws.send(JSON.stringify({ type: 'video-reveal', id: `r${++videoSeq}-${Date.now().toString(36)}`, file }));
+}
+
 /** 连接断开时收尾所有在途视频任务（daemon 侧也会杀掉对应 yt-dlp）。 */
 function flushVideoPending(message: string): void {
   for (const [id, cb] of videoPending) {

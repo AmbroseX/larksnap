@@ -69,6 +69,8 @@ export const MSG = {
   LIST_VIDEO_TASKS: 'list_video_tasks',
   /** 清除已结束（成功/失败）的下载任务 */
   CLEAR_VIDEO_TASKS: 'clear_video_tasks',
+  /** 在系统文件管理器里显示下载产物（daemon 执行；无 taskId 时打开下载根目录） */
+  REVEAL_VIDEO_FILE: 'reveal_video_file',
   /** SW → UI：任务列表变化推送（全量） */
   VIDEO_TASKS: 'video_tasks',
   // 标签页链接复制

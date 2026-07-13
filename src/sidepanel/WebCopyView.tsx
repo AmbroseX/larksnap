@@ -387,6 +387,11 @@ export function WebCopyView() {
     await sendToBackground(MSG.CLEAR_VIDEO_TASKS);
   };
 
+  const handleRevealTask = async (taskId?: string) => {
+    const res = await sendToBackground(MSG.REVEAL_VIDEO_FILE, { taskId });
+    if (!res.success) report(false, res.error || '');
+  };
+
   const handleToggleAutoCopy = () =>
     run('autocopy', async () => {
       const next = { ...webcopyCfg, autoCopyEnabled: !webcopyCfg.autoCopyEnabled };
@@ -473,11 +478,16 @@ export function WebCopyView() {
         <div className="wc-card">
           <div className="wc-card-title wc-task-head-row">
             {t('webcopy.video.tasksTitle')}
-            {videoTasks.some((x) => x.status === 'success' || x.status === 'error') && (
-              <button className="wc-task-clear" onClick={handleClearTasks}>
-                {t('webcopy.video.clearDone')}
+            <span className="wc-task-actions">
+              <button className="wc-task-clear open" onClick={() => handleRevealTask()}>
+                {t('webcopy.video.openFolder')}
               </button>
-            )}
+              {videoTasks.some((x) => x.status === 'success' || x.status === 'error') && (
+                <button className="wc-task-clear" onClick={handleClearTasks}>
+                  {t('webcopy.video.clearDone')}
+                </button>
+              )}
+            </span>
           </div>
           {videoTasks.map((task) => (
             <div key={task.id} className="wc-task">
@@ -497,6 +507,11 @@ export function WebCopyView() {
                 </span>
                 {task.status === 'running' && (
                   <span className="wc-task-pct">{task.percent ?? 0}%</span>
+                )}
+                {task.status === 'success' && (
+                  <button className="wc-task-open" onClick={() => handleRevealTask(task.id)}>
+                    {t('webcopy.video.revealFile')}
+                  </button>
                 )}
               </div>
               {task.message && (

@@ -16,6 +16,7 @@ import { getConfig } from '../shared/storage';
 import {
   requestVideoDownload,
   requestVideoProbe,
+  requestVideoReveal,
   videoBridgeReady,
   type VideoJobRequest,
 } from './bridge';
@@ -219,6 +220,16 @@ export function clearVideoTasks(): Response<{ removed: number }> {
   }
   broadcastTasks();
   return { success: true, data: { removed } };
+}
+
+/** 在系统文件管理器里显示任务产物；不传 taskId（或文件已移走）就打开下载根目录 */
+export function revealVideoTask(taskId?: string): Response<null> {
+  try {
+    requestVideoReveal(taskId ? tasks.get(taskId)?.file : undefined);
+    return { success: true, data: null };
+  } catch (e) {
+    return { success: false, error: e instanceof Error ? e.message : String(e) };
+  }
 }
 
 /** 有空位就把排队任务派给 daemon */

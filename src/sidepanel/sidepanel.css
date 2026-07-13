@@ -416,6 +416,25 @@ body {
   cursor: pointer;
 }
 .wc-task-clear:hover { color: #cf1322; }
+.wc-task-clear.open:hover { color: #1677ff; }
+
+.wc-task-actions {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+}
+
+/* 成功任务行内的「打开文件夹」小按钮，靠右不换行 */
+.wc-task-open {
+  border: none;
+  background: none;
+  font-size: 12px;
+  color: #1677ff;
+  cursor: pointer;
+  flex: none;
+  padding: 0;
+}
+.wc-task-open:hover { text-decoration: underline; }
 
 .wc-task {
   padding: 6px 0;

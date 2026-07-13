@@ -231,6 +231,8 @@ export const en: Dict = {
       queued: 'Added to download queue',
       tasksTitle: 'Download tasks',
       clearDone: 'Clear finished',
+      openFolder: 'Open folder',
+      revealFile: 'Show in folder',
       statusQueued: 'Queued',
       statusRunning: 'Downloading',
       statusSuccess: 'Done',
