@@ -2,49 +2,52 @@ import { useEffect, useState, useCallback, useRef } from 'react';
 import type {
   DocInfo,
   ExportProgress,
+  NavigationIntent,
   PageKindInfo,
   RuntimeState,
+  TaskRecord,
 } from '../shared/types';
-import { MSG } from '../shared/constants';
+import { MSG, STORAGE_KEYS } from '../shared/constants';
 import { sendToBackground, onBackgroundMessage } from '../shared/messaging';
-import { getConfig } from '../shared/storage';
 import { hostOf, permissionPattern } from '../shared/feishu-host';
-import { getWechatTheme } from '../shared/themes';
 import { useI18n } from '../shared/i18n/useI18n';
-import { t } from '../shared/i18n';
-import { ACTIONS, type ActionItem } from './actions';
+import { type ActionItem } from './actions';
 import { copyHtmlToClipboard } from './copy-html';
 import { XhsPreview, type XhsPreviewData } from './XhsPreview';
-
-/** 公众号样式的悬浮预览：用主题真实配色渲染一小段标题/正文/引用示例 */
-function WechatThemePreview({ themeId }: { themeId: string }) {
-  const theme = getWechatTheme(themeId);
-  return (
-    <div className="wtp">
-      <div
-        className="wtp-heading"
-        style={{
-          color: theme.headingColor,
-          ...(theme.accentBar
-            ? { borderLeft: `3px solid ${theme.accentBar}`, paddingLeft: 8 }
-            : {}),
-        }}
-      >
-        {t('sidepanel.themePreview.heading')}
-      </div>
-      <p className="wtp-body">{t('sidepanel.themePreview.body')}</p>
-      <div className="wtp-quote" style={{ borderLeft: `3px solid ${theme.quoteBorder}` }}>
-        {t('sidepanel.themePreview.quote')}
-      </div>
-    </div>
-  );
-}
 import { CacheView } from './CacheView';
-import { WebCopyView } from './WebCopyView';
-import { TranscriptCard } from './TranscriptCard';
-import { SummaryView } from './SummaryView';
+import { HeaderStatus } from './HeaderStatus';
+import { ContextZone, VideoSection } from './ContextZone';
+import { ToolGroups } from './ToolGroups';
+import { Footer } from './Footer';
+import { ChatView, type ChatAutoStart } from './ChatView';
 
-type View = 'home' | 'cache' | 'xhsPreview';
+/**
+ * 侧边栏主组件（006 重构，007 增加双页 Tab）：
+ *   header（logo + daemon 状态点 + 工具/AI 对话 Tab + 设置 + 缓存库）
+ *   → home（上下文区 + 通用工具区）⇄ chat（AI 对话页，保持挂载切显隐——
+ *     卸载会断 Port 导致 SW 中止流式生成）。
+ * cache、xhsPreview 仍是带返回的二级页。
+ */
+
+type View = 'home' | 'chat' | 'cache' | 'xhsPreview';
+
+/**
+ * 读取并消费「AI 总结」导航意图（006，右键/快捷键入口写入）：
+ * 单槽、读到即删（一次性）、超 30s 视为过期丢弃、形状不合法丢弃。
+ */
+async function consumeIntent(): Promise<NavigationIntent | null> {
+  try {
+    const got = await chrome.storage.session.get(STORAGE_KEYS.INTENT);
+    const intent = got[STORAGE_KEYS.INTENT] as NavigationIntent | undefined;
+    if (!intent || intent.target !== 'summary') return null;
+    await chrome.storage.session.remove(STORAGE_KEYS.INTENT);
+    if (typeof intent.tabId !== 'number' || typeof intent.url !== 'string') return null;
+    if (Date.now() - (intent.createdAt || 0) > 30_000) return null;
+    return intent.autoStart ? intent : null;
+  } catch {
+    return null;
+  }
+}
 
 export function SidePanel() {
   const { t } = useI18n();
@@ -55,23 +58,58 @@ export function SidePanel() {
   const [percent, setPercent] = useState<number | null>(null);
   const [phase, setPhase] = useState<ExportProgress['status']>('idle');
   const [doc, setDoc] = useState<DocInfo | null>(null);
-  /** 页面三态（004）：youtube 出字幕+总结入口，generic 出总结入口，feishu 现状不动 */
-  const [pageKind, setPageKind] = useState<PageKindInfo['kind'] | null>(null);
+  /** 页面五分类（006）：驱动上下文区渲染 */
+  const [pageInfo, setPageInfo] = useState<PageKindInfo | null>(null);
   const [authing, setAuthing] = useState(false);
-  /** 当前展开样式选择器的 action key */
-  const [pickerFor, setPickerFor] = useState<string | null>(null);
   /** 小红书卡片预览数据（出图后先预览，确认再下载） */
   const [xhsPreview, setXhsPreview] = useState<XhsPreviewData | null>(null);
-  /** 悬浮中的公众号样式 id（展示排版预览） */
-  const [hoverWechatTheme, setHoverWechatTheme] = useState<string | null>(null);
+  /** 当前标签页最近一条后台任务失败记录（右键/快捷键触发，US5） */
+  const [taskErr, setTaskErr] = useState<TaskRecord | null>(null);
+  /** 导航意图带来的自动总结目标（消费后传给 ChatView，按 ts 去重） */
+  const [chatIntent, setChatIntent] = useState<ChatAutoStart | null>(null);
 
   const resetTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  /** home ⇄ chat 切换并记住停留页（独立键，不与 ui-prefs 互写，007） */
+  const switchView = useCallback((v: 'home' | 'chat') => {
+    setView(v);
+    void chrome.storage.local.set({ [STORAGE_KEYS.LAST_VIEW]: v });
+  }, []);
+
+  // 恢复上次停留页 + 消费「AI 总结」导航意图（意图优先，直接落到对话页）
+  useEffect(() => {
+    let landed = false;
+    const tryConsume = () =>
+      void consumeIntent().then((intent) => {
+        if (!intent) return;
+        landed = true;
+        setChatIntent({ tabId: intent.tabId, url: intent.url, ts: Date.now() });
+        setView('chat');
+      });
+    chrome.storage.local.get(STORAGE_KEYS.LAST_VIEW).then((got) => {
+      if (!landed && got[STORAGE_KEYS.LAST_VIEW] === 'chat') setView('chat');
+    });
+    tryConsume();
+    const listener = (
+      changes: Record<string, chrome.storage.StorageChange>,
+      area: string
+    ) => {
+      if (area !== 'session' || !changes[STORAGE_KEYS.INTENT]?.newValue) return;
+      tryConsume();
+    };
+    chrome.storage.onChanged.addListener(listener);
+    return () => chrome.storage.onChanged.removeListener(listener);
+  }, []);
 
   const refreshDoc = useCallback(async () => {
     const res = await sendToBackground<DocInfo>(MSG.GET_DOC_INFO);
     if (res.success) setDoc(res.data ?? null);
     const kind = await sendToBackground<PageKindInfo>(MSG.GET_PAGE_KIND);
-    if (kind.success) setPageKind(kind.data?.kind ?? null);
+    if (kind.success) setPageInfo(kind.data ?? null);
+    // 后台任务记录：最近一条失败的展示在状态栏上方（打开侧边栏即视为已读，背景会清角标）
+    const tasks = await sendToBackground<TaskRecord[]>(MSG.LIST_TASK_RECORDS);
+    const latest = tasks.success ? tasks.data?.[0] : null;
+    setTaskErr(latest && latest.status === 'error' ? latest : null);
   }, []);
 
   // 成功提示挂几秒就够了，自动回到"准备就绪"；出错的提示保留给用户看
@@ -212,28 +250,10 @@ export function SidePanel() {
     [armIdleReset]
   );
 
-  const handleClick = useCallback(
-    async (item: ActionItem) => {
-      if (item.disabled || running) return;
-
-      // 前端动作
-      if (item.clientAction === 'cacheList') {
-        setView('cache');
-        return;
-      }
-      if (item.clientAction === 'feedback') {
-        const config = await getConfig();
-        chrome.tabs.create({ url: config.feedbackUrl });
-        return;
-      }
-
-      // 有样式可选：先展开/收起选择器，点具体样式才执行
-      if (item.themes?.length) {
-        setPickerFor((cur) => (cur === item.key ? null : item.key));
-        return;
-      }
-
-      await runAction(item);
+  const handleAction = useCallback(
+    (item: ActionItem) => {
+      if (running) return;
+      void runAction(item);
     },
     [running, runAction]
   );
@@ -249,7 +269,6 @@ export function SidePanel() {
     (item: ActionItem, themeId: string) => {
       if (running) return;
       localStorage.setItem(`larksnap:style:${item.key}`, themeId);
-      setPickerFor(null);
       void runAction(item, themeId);
     },
     [running, runAction]
@@ -271,17 +290,51 @@ export function SidePanel() {
     );
   }
 
+  const kind = pageInfo?.kind ?? null;
   const needsAuth = !!doc?.isFeishuDoc && !!doc?.needsAuth;
   const notFeishu = doc != null && !doc.isFeishuDoc;
   // 普通网页未授权：不挡侧边栏功能（有手势兜底），只给桥接后台抓取一个授权入口
   const webNeedsAuth = notFeishu && !!doc?.needsAuth;
 
   return (
-    <div className="panel">
+    <div className={`panel${view === 'chat' ? ' panel-chat' : ''}`}>
       <header className="panel-header">
         <div className="title-row">
           <h1>{t('sidepanel.title')}</h1>
-          <span className="badge badge-free">{t('sidepanel.badgeFree')}</span>
+          <HeaderStatus />
+          <div className="hd-tabs">
+            <button
+              type="button"
+              className={`hd-tab${view !== 'chat' ? ' active' : ''}`}
+              onClick={() => switchView('home')}
+            >
+              {t('sidepanel.tabTools')}
+            </button>
+            <button
+              type="button"
+              className={`hd-tab${view === 'chat' ? ' active' : ''}`}
+              onClick={() => switchView('chat')}
+            >
+              {t('sidepanel.tabChat')}
+            </button>
+          </div>
+          <span className="title-spacer" />
+          <button
+            type="button"
+            className="hd-icon-btn"
+            title={t('sidepanel.headerSettings')}
+            onClick={() => chrome.runtime.openOptionsPage()}
+          >
+            ⚙
+          </button>
+          <button
+            type="button"
+            className="hd-icon-btn"
+            title={t('sidepanel.headerCache')}
+            onClick={() => setView('cache')}
+          >
+            🗂
+          </button>
           <button
             type="button"
             className="close-btn"
@@ -291,106 +344,54 @@ export function SidePanel() {
             ✕
           </button>
         </div>
-        <p className="subtitle">
-          {doc?.isFeishuDoc
-            ? `${doc.docType}${doc.isPrivateDeploy ? t('sidepanel.privateSuffix') : ''}`
-            : t('sidepanel.subtitleWeb')}
-        </p>
-        <div className="quota-chip">
-          <span className="quota-label">{t('sidepanel.quotaLabel')}</span>
-          <span>{t('sidepanel.quotaValue')}</span>
-        </div>
       </header>
 
       {needsAuth && (
         <div className="auth-banner">
           <p>{t('sidepanel.authBannerFeishu')}</p>
-          <button
-            className="auth-btn"
-            onClick={handleAuthorize}
-            disabled={authing}
-          >
+          <button className="auth-btn" onClick={handleAuthorize} disabled={authing}>
+            {authing ? t('sidepanel.authorizing') : t('sidepanel.authorize')}
+          </button>
+        </div>
+      )}
+      {webNeedsAuth && (
+        <div className="auth-banner">
+          <p>{t('sidepanel.authBannerWeb')}</p>
+          <button className="auth-btn" onClick={handleAuthorize} disabled={authing}>
             {authing ? t('sidepanel.authorizing') : t('sidepanel.authorize')}
           </button>
         </div>
       )}
 
-      {/* 非飞书页面：网页复制区块为主入口；飞书页面：导出区块（现状） */}
-      {notFeishu ? (
-        <>
-          {webNeedsAuth && (
-            <div className="auth-banner">
-              <p>{t('sidepanel.authBannerWeb')}</p>
-              <button
-                className="auth-btn"
-                onClick={handleAuthorize}
-                disabled={authing}
-              >
-                {authing ? t('sidepanel.authorizing') : t('sidepanel.authorize')}
-              </button>
-            </div>
-          )}
-          {/* 004 三态入口：YouTube 视频页出字幕卡片，YouTube/普通页出 AI 总结卡片 */}
-          {pageKind === 'youtube' && <TranscriptCard />}
-          {(pageKind === 'youtube' || pageKind === 'generic') && <SummaryView />}
-          {pageKind === 'restricted' && (
-            <div className="wc-card">
-              <div className="wc-row-sub">{t('sidepanel.restrictedPage')}</div>
-            </div>
-          )}
-          <WebCopyView />
-        </>
-      ) : (
-        <main className="action-list">
-          {ACTIONS.map((item) => (
-            <div key={item.key} className="action-group">
-              <button
-                className={`action-card${item.disabled ? ' disabled' : ''}${
-                  running === item.key ? ' running' : ''
-                }`}
-                onClick={() => handleClick(item)}
-                disabled={item.disabled || !!running || needsAuth}
-              >
-                <div className="action-text">
-                  <span className="action-title">{t(item.title)}</span>
-                  <span className="action-subtitle">{t(item.subtitle)}</span>
-                </div>
-                <span className="action-arrow">
-                  {item.themes ? (pickerFor === item.key ? '⌄' : '›') : '›'}
-                </span>
-              </button>
-              {item.themes && pickerFor === item.key && (
-                <>
-                  <div
-                    className="theme-picker"
-                    onMouseLeave={() => setHoverWechatTheme(null)}
-                  >
-                    {item.themes.map((th) => (
-                      <button
-                        key={th.id}
-                        className={`theme-chip${savedTheme(item) === th.id ? ' selected' : ''}`}
-                        disabled={!!running}
-                        onClick={() => handleThemeClick(item, th.id)}
-                        onMouseEnter={() =>
-                          item.key === 'wechat' && setHoverWechatTheme(th.id)
-                        }
-                      >
-                        <span className="theme-swatch" style={{ background: th.swatch }} />
-                        {t(th.name)}
-                      </button>
-                    ))}
-                  </div>
-                  {item.key === 'wechat' && hoverWechatTheme && (
-                    <WechatThemePreview themeId={hoverWechatTheme} />
-                  )}
-                </>
-              )}
-            </div>
-          ))}
-        </main>
-      )}
+      <main
+        className="home-main"
+        style={view === 'chat' ? { display: 'none' } : undefined}
+      >
+        <ContextZone
+          doc={doc}
+          pageInfo={pageInfo}
+          running={running}
+          needsAuth={needsAuth}
+          onAction={handleAction}
+          onPickTheme={handleThemeClick}
+          savedTheme={savedTheme}
+        />
+        {/* 视频下载卡 + 任务列表：视频站点显示卡片，有任务时列表任何非飞书页可见 */}
+        {kind !== 'feishu' && <VideoSection />}
+        <ToolGroups disabled={kind === 'restricted'} onOpenChat={() => switchView('chat')} />
+      </main>
 
-      <footer className="status-bar">
+      {/* 对话页保持挂载只切显隐：卸载会断 Port，SW 会中止进行中的流式生成 */}
+      <div className="chat-host" style={view === 'chat' ? undefined : { display: 'none' }}>
+        <ChatView autoStart={chatIntent} />
+      </div>
+
+      <footer className="status-bar" style={view === 'chat' ? { display: 'none' } : undefined}>
+        {taskErr && (
+          <div className="task-error-line" title={taskErr.error}>
+            {t('sidepanel.lastTaskFailed', { msg: taskErr.error ?? '' })}
+          </div>
+        )}
         {phase === 'running' && (
           <div className={`progress-track${percent == null ? ' indeterminate' : ''}`}>
             <div
@@ -405,6 +406,7 @@ export function SidePanel() {
             <span className="status-pct">{percent}%</span>
           )}
         </div>
+        <Footer />
       </footer>
     </div>
   );

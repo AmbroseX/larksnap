@@ -6,7 +6,7 @@ import {
   type ThemeOption,
 } from '../shared/themes';
 
-/** 侧边栏一个操作卡片的配置 */
+/** 侧边栏飞书动作的配置（006：按组布局——export 主按钮网格 / publish 样式直选行 / misc 单行） */
 export interface ActionItem {
   /** 唯一 key */
   key: string;
@@ -14,41 +14,47 @@ export interface ActionItem {
   title: TranslationKey;
   /** 副标题（i18n 字典 key） */
   subtitle: TranslationKey;
-  /** 点击发送给背景的消息类型；为空表示前端自行处理（如打开页面 / 视图切换） */
+  /** 点击发送给背景的消息类型 */
   msg?: string;
-  /** 是否禁用（功能开发中） */
-  disabled?: boolean;
-  /** 前端动作：'cacheList' 切到缓存列表视图，'feedback' 打开反馈页 */
-  clientAction?: 'cacheList' | 'feedback';
-  /** 有样式可选的导出：点卡片先展开选择器，点样式再执行 */
+  /** 渲染分组 */
+  group: 'export' | 'publish' | 'misc';
+  /** 有样式可选的导出：下拉直选，点样式即执行（publish 组） */
   themes?: ThemeOption[];
 }
 
-/** 与 PRD 一致的操作清单 */
+/**
+ * 飞书上下文区动作清单（4 主按钮 + 转发布 + 缓存）。
+ * word 占位卡已删除（等功能真做了再加回）；「查看缓存」并入 header 缓存库图标；
+ * 「诊断」「反馈」移页脚小字链接（见 Footer.tsx）。
+ */
 export const ACTIONS: ActionItem[] = [
   {
     key: 'markdown',
     title: 'actions.markdown.title',
     subtitle: 'actions.markdown.subtitle',
     msg: MSG.EXPORT_MARKDOWN,
-  },
-  {
-    key: 'word',
-    title: 'actions.word.title',
-    subtitle: 'actions.word.subtitle',
-    disabled: true,
+    group: 'export',
   },
   {
     key: 'pdf',
     title: 'actions.pdf.title',
     subtitle: 'actions.pdf.subtitle',
     msg: MSG.EXPORT_PDF,
+    group: 'export',
   },
   {
     key: 'html',
     title: 'actions.html.title',
     subtitle: 'actions.html.subtitle',
     msg: MSG.EXPORT_HTML,
+    group: 'export',
+  },
+  {
+    key: 'attachments',
+    title: 'actions.attachments.title',
+    subtitle: 'actions.attachments.subtitle',
+    msg: MSG.EXPORT_ATTACHMENTS,
+    group: 'export',
   },
   {
     key: 'xhs',
@@ -56,6 +62,7 @@ export const ACTIONS: ActionItem[] = [
     subtitle: 'actions.xhs.subtitle',
     msg: MSG.EXPORT_XHS,
     themes: XHS_THEME_OPTIONS,
+    group: 'publish',
   },
   {
     key: 'wechat',
@@ -63,35 +70,13 @@ export const ACTIONS: ActionItem[] = [
     subtitle: 'actions.wechat.subtitle',
     msg: MSG.EXPORT_WECHAT,
     themes: WECHAT_THEME_OPTIONS,
-  },
-  {
-    key: 'attachments',
-    title: 'actions.attachments.title',
-    subtitle: 'actions.attachments.subtitle',
-    msg: MSG.EXPORT_ATTACHMENTS,
+    group: 'publish',
   },
   {
     key: 'cache',
     title: 'actions.cache.title',
     subtitle: 'actions.cache.subtitle',
     msg: MSG.CACHE_DOC,
-  },
-  {
-    key: 'cacheList',
-    title: 'actions.cacheList.title',
-    subtitle: 'actions.cacheList.subtitle',
-    clientAction: 'cacheList',
-  },
-  {
-    key: 'diagnostic',
-    title: 'actions.diagnostic.title',
-    subtitle: 'actions.diagnostic.subtitle',
-    msg: MSG.EXPORT_DIAGNOSTIC,
-  },
-  {
-    key: 'feedback',
-    title: 'actions.feedback.title',
-    subtitle: 'actions.feedback.subtitle',
-    clientAction: 'feedback',
+    group: 'misc',
   },
 ];
