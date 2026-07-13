@@ -3,6 +3,7 @@ import type { MediaBlob } from '../content/api/media';
 import { CONTENT_MSG } from '../shared/constants';
 import { bytesToBase64 } from './media-util';
 import { getActiveTab } from './doc-detect';
+import { t } from '../shared/i18n';
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
@@ -32,8 +33,8 @@ async function send<T>(tabId: number, message: unknown): Promise<T> {
   const res = (await chrome.tabs.sendMessage(tabId, message)) as
     | Response<T>
     | undefined;
-  if (!res) throw new Error('content 无响应（页面可能未注入或已关闭）');
-  if (!res.success) throw new Error(res.error || 'content 请求失败');
+  if (!res) throw new Error(t('bg.contentNoResponseDetail'));
+  if (!res.success) throw new Error(res.error || t('bg.contentRequestFailed'));
   return res.data as T;
 }
 
@@ -44,7 +45,7 @@ async function send<T>(tabId: number, message: unknown): Promise<T> {
 export async function resolveTargetTabId(): Promise<number> {
   if (_contentTabId != null) return _contentTabId;
   const tab = await getActiveTab();
-  if (!tab?.id) throw new Error('无活跃标签页');
+  if (!tab?.id) throw new Error(t('bg.noActiveTab'));
   return tab.id;
 }
 
@@ -55,7 +56,7 @@ async function activeContentTab(): Promise<number> {
     return _contentTabId;
   }
   const tab = await getActiveTab();
-  if (!tab?.id) throw new Error('无活跃标签页');
+  if (!tab?.id) throw new Error(t('bg.noActiveTab'));
   await ensureContent(tab.id);
   return tab.id;
 }

@@ -1,4 +1,5 @@
 import type { DocInfo, Response } from '../../shared/types';
+import { t } from '../../shared/i18n';
 import { reportProgress } from '../progress';
 import { resolveObjToken, fetchClientVars } from '../feishu-api';
 import { buildBlockTree } from '../convert/adapter';
@@ -22,7 +23,7 @@ export async function exportWechat(
   doc: DocInfo,
   themeId?: string
 ): Promise<Response<WechatResult>> {
-  await reportProgress('wechat', 'running', '正在拉取文档内容...');
+  await reportProgress('wechat', 'running', t('progress.common.fetchingDoc'));
 
   try {
     const resolved = await resolveObjToken(doc);
@@ -34,27 +35,32 @@ export async function exportWechat(
     const images = collectImageAssets(tree);
     let imageMap: Record<string, string | null> = {};
     if (images.length) {
-      await reportProgress('wechat', 'running', `正在下载 ${images.length} 张图片...`, 10);
+      await reportProgress(
+        'wechat',
+        'running',
+        t('progress.common.downloadingImages', { n: images.length }),
+        10
+      );
       imageMap = await downloadImageDataUrls(doc.host, images, (d, total) =>
         reportProgress(
           'wechat',
           'running',
-          `正在下载图片 ${d}/${total}...`,
+          t('progress.common.downloadingImage', { done: d, total }),
           10 + Math.round((d / total) * 80)
         )
       );
     }
 
-    await reportProgress('wechat', 'running', '正在生成公众号格式...', 95);
+    await reportProgress('wechat', 'running', t('progress.wechat.generating'), 95);
     const html = renderWechatHtml(tree, imageMap, getWechatTheme(themeId));
-    if (!html.trim()) throw new Error('文档没有可转换的内容');
+    if (!html.trim()) throw new Error(t('progress.wechat.empty'));
 
     // 最终"已复制"提示由侧边栏在写完剪贴板后给出
-    await reportProgress('wechat', 'success', '公众号格式已生成', 100);
+    await reportProgress('wechat', 'success', t('progress.wechat.done'), 100);
     return { success: true, data: { html, title } };
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
-    await reportProgress('wechat', 'error', `公众号格式生成失败：${msg}`);
+    await reportProgress('wechat', 'error', t('progress.wechat.failed', { msg }));
     return { success: false, error: msg };
   }
 }

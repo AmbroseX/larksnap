@@ -1,4 +1,5 @@
 import type { WebCopyConfig } from '../../shared/types';
+import { t } from '../../shared/i18n';
 import { selectionToMarkdown, selectionText } from './html2md';
 import { writeClipboard } from './clipboard';
 import { showToast } from './toast';
@@ -46,7 +47,7 @@ function onSelectionEnd(): void {
     try {
       await writeClipboard(text);
       lastCopied = plain;
-      showToast(`已复制 ${plain.length} 字`);
+      showToast(t('toast.copiedChars', { n: plain.length }));
     } catch {
       // 自动触发场景静默失败，不打扰用户
     }

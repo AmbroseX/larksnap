@@ -2,6 +2,8 @@ import { useCallback, useEffect, useState } from 'react';
 import { createZipDataUrl, type ZipFile } from '../background/zip';
 import { base64ToBytes } from '../background/media-util';
 import { downloadDataUrl, safeName } from '../background/download';
+import { t } from '../shared/i18n';
+import { useI18n } from '../shared/i18n/useI18n';
 
 /**
  * 小红书卡片预览页：SW 出图后先到这里过目，确认再打包下载。
@@ -24,6 +26,7 @@ interface Props {
 }
 
 export function XhsPreview({ data, onBack }: Props) {
+  useI18n(); // 订阅语言切换，切换时整块重渲染
   const [downloading, setDownloading] = useState(false);
   const [note, setNote] = useState('');
   /** 勾中的卡片下标（默认全选） */
@@ -84,7 +87,7 @@ export function XhsPreview({ data, onBack }: Props) {
   const handleDownload = async () => {
     if (!selected.size) return;
     setDownloading(true);
-    setNote('正在打包...');
+    setNote(t('xhsPreview.packingNote'));
     try {
       // 只打包勾中的，文件名保留原始序号，顺序不乱
       const files: ZipFile[] = [...selected]
@@ -94,10 +97,10 @@ export function XhsPreview({ data, onBack }: Props) {
           content: base64ToBytes(data.pngs[i].slice(data.pngs[i].indexOf(',') + 1)),
         }));
       const url = await createZipDataUrl(files);
-      await downloadDataUrl(url, `${safeName(data.title)}-小红书卡片.zip`);
-      setNote(`已开始下载（${files.length} 张）`);
+      await downloadDataUrl(url, `${safeName(data.title)}-${t('xhsPreview.zipSuffix')}.zip`);
+      setNote(t('xhsPreview.started', { n: files.length }));
     } catch (e) {
-      setNote(`下载失败：${e instanceof Error ? e.message : String(e)}`);
+      setNote(t('xhsPreview.failed', { err: e instanceof Error ? e.message : String(e) }));
     } finally {
       setDownloading(false);
     }
@@ -108,19 +111,23 @@ export function XhsPreview({ data, onBack }: Props) {
       <header className="panel-header">
         <div className="title-row">
           <button className="back-btn" onClick={onBack}>
-            ‹ 返回
+            {t('xhsPreview.back')}
           </button>
-          <h1>卡片预览</h1>
+          <h1>{t('xhsPreview.title')}</h1>
         </div>
         <p className="subtitle">
-          共 {total} 张{data.themeName ? ` · ${data.themeName}` : ''} ·
-          点卡片放大，勾选要下载的
+          {t('xhsPreview.subtitle', {
+            total,
+            theme: data.themeName ? ` · ${data.themeName}` : '',
+          })}
         </p>
         <div className="preview-toolbar">
           <button className="preview-selectall" onClick={toggleAll}>
-            {allSelected ? '全不选' : '全选'}
+            {allSelected ? t('xhsPreview.selectNone') : t('xhsPreview.selectAll')}
           </button>
-          <span className="preview-count">已选 {selected.size}/{total}</span>
+          <span className="preview-count">
+            {t('xhsPreview.selectedCount', { n: selected.size, total })}
+          </span>
         </div>
       </header>
 
@@ -131,13 +138,13 @@ export function XhsPreview({ data, onBack }: Props) {
             <figure key={i} className={`preview-cell${on ? '' : ' unselected'}`}>
               <img
                 src={png}
-                alt={`卡片 ${i + 1}`}
+                alt={t('xhsPreview.cardAlt', { n: i + 1 })}
                 loading="lazy"
                 onClick={() => setZoom(i)}
               />
               <button
                 className={`preview-check${on ? ' on' : ''}`}
-                title={on ? '取消选择' : '选择此张'}
+                title={on ? t('xhsPreview.checkOn') : t('xhsPreview.checkOff')}
                 onClick={() => toggle(i)}
               >
                 ✓
@@ -155,13 +162,13 @@ export function XhsPreview({ data, onBack }: Props) {
           disabled={downloading || selected.size === 0}
         >
           {downloading
-            ? '打包中...'
+            ? t('xhsPreview.packing')
             : selected.size === 0
-              ? '未选择卡片'
-              : `确认下载 ZIP（已选 ${selected.size} 张）`}
+              ? t('xhsPreview.noneSelected')
+              : t('xhsPreview.confirm', { n: selected.size })}
         </button>
         <button className="preview-cancel" onClick={onBack} disabled={downloading}>
-          取消
+          {t('common.cancel')}
         </button>
         {note && <p className="preview-note">{note}</p>}
       </footer>
@@ -175,8 +182,8 @@ export function XhsPreview({ data, onBack }: Props) {
             <img
               className={`lightbox-img${fill ? ' fill' : ''}`}
               src={data.pngs[zoom]}
-              alt={`卡片 ${zoom + 1}`}
-              title={fill ? '点击恢复适应大小' : '点击查看原始尺寸'}
+              alt={t('xhsPreview.cardAlt', { n: zoom + 1 })}
+              title={fill ? t('xhsPreview.fillOn') : t('xhsPreview.fillOff')}
               onClick={(e) => {
                 e.stopPropagation();
                 setFill((f) => !f);
@@ -212,17 +219,17 @@ export function XhsPreview({ data, onBack }: Props) {
                 checked={selected.has(zoom)}
                 onChange={() => toggle(zoom)}
               />
-              选中此张
+              {t('xhsPreview.selectThis')}
             </label>
             <span className="lightbox-page">
               {zoom + 1}/{total}
             </span>
             <button
               className="lightbox-open"
-              title="在新标签页查看 1080 宽原图"
+              title={t('xhsPreview.originalTitle')}
               onClick={() => openInTab(zoom)}
             >
-              原图
+              {t('xhsPreview.original')}
             </button>
             <button className="lightbox-close" onClick={() => setZoom(null)}>
               ✕

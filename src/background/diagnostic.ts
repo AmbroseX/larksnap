@@ -1,6 +1,7 @@
 import type { DocInfo, Response } from '../shared/types';
 import { EXTENSION_VERSION } from '../shared/constants';
 import { getConfig, getMarkdownCapability } from '../shared/storage';
+import { t } from '../shared/i18n';
 import { reportProgress } from './progress';
 import { resolveObjToken, fetchClientVars } from './feishu-api';
 import { getSnapshot } from './feishu-proxy';
@@ -37,9 +38,18 @@ function sanitize(value: unknown, depth = 0): unknown {
  * 收集：环境 + DocInfo + 脱敏 client_vars 样本 + Markdown 选路结论 + 快照摘要。
  */
 export async function exportDiagnostic(doc: DocInfo | null): Promise<Response> {
-  await reportProgress('diagnostic', 'running', '正在收集诊断信息...', 40);
+  await reportProgress('diagnostic', 'running', t('progress.diagnostic.collecting'), 40);
 
   const config = await getConfig();
+
+  // 诊断包附带配置便于排查，但打包前必须显式删除 AI 的 API Key——
+  // 用户凭据绝不进诊断包（FR-006 取证点，宪法 V）
+  const reportConfig: Record<string, unknown> = { ...config };
+  if (config.ai) {
+    const aiSafe: Record<string, unknown> = { ...config.ai };
+    delete aiSafe.apiKey;
+    reportConfig.ai = aiSafe;
+  }
 
   // 块内容样本（脱敏）——仅在已识别+已授权时尝试，失败不阻断
   let blocksSample: unknown = null;
@@ -66,7 +76,7 @@ export async function exportDiagnostic(doc: DocInfo | null): Promise<Response> {
     }
   }
 
-  await reportProgress('diagnostic', 'running', '正在打包诊断信息...', 80);
+  await reportProgress('diagnostic', 'running', t('progress.diagnostic.packing'), 80);
 
   const report = {
     version: EXTENSION_VERSION,
@@ -76,6 +86,7 @@ export async function exportDiagnostic(doc: DocInfo | null): Promise<Response> {
     mdCapability,
     blocksSample,
     snapshotSummary,
+    config: reportConfig,
   };
 
   const json = JSON.stringify(report, null, 2);
@@ -87,11 +98,11 @@ export async function exportDiagnostic(doc: DocInfo | null): Promise<Response> {
       filename: `larksnap-diagnostic-${Date.now()}.json`,
       saveAs: true,
     });
-    await reportProgress('diagnostic', 'success', '诊断信息已导出', 100);
+    await reportProgress('diagnostic', 'success', t('progress.diagnostic.done'), 100);
     return { success: true };
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
-    await reportProgress('diagnostic', 'error', `导出失败：${message}`);
+    await reportProgress('diagnostic', 'error', t('progress.diagnostic.failed', { msg: message }));
     return { success: false, error: message };
   }
 }

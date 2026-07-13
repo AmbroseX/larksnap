@@ -1,0 +1,10 @@
+{
+  "appName": {
+    "message": "LarkSnap · Feishu Document Exporter",
+    "description": "Extension name (management page and icon hover title)"
+  },
+  "appDesc": {
+    "message": "One-click export of Feishu/Lark docs to Markdown / PDF / HTML with batch attachment download and offline cache; convert any web page to Markdown, remove copy restrictions, and auto-copy selections.",
+    "description": "Extension description (store and management page)"
+  }
+}

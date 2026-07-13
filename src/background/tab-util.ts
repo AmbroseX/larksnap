@@ -1,3 +1,4 @@
+import { t } from '../shared/i18n';
 /** 标签页工具 —— bridge（抓取任务）与 editor（编辑任务）共用。 */
 
 /** 等标签页加载完成（飞书为 SPA，complete 后再宽限一会儿让页面上下文就绪）。 */
@@ -12,11 +13,11 @@ export function waitForTabComplete(tabId: number, timeoutMs = 30000): Promise<vo
           return;
         }
       } catch {
-        reject(new Error('标签页已关闭'));
+        reject(new Error(t('bg.tabClosed')));
         return;
       }
       if (Date.now() > deadline) {
-        reject(new Error('打开文档超时'));
+        reject(new Error(t('bg.openDocTimeout')));
         return;
       }
       setTimeout(tick, 300);

@@ -1,0 +1,10 @@
+{
+  "appName": {
+    "message": "LarkSnap · 飞书文档导出助手",
+    "description": "扩展名称（浏览器管理页与图标悬停标题）"
+  },
+  "appDesc": {
+    "message": "在飞书文档页面一键导出为 Markdown / PDF / HTML，批量下载附件，支持离线缓存；任意网页一键转 Markdown、解除复制限制、选中自动复制。",
+    "description": "扩展描述（应用商店与管理页）"
+  }
+}

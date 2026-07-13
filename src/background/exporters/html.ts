@@ -1,4 +1,5 @@
 import type { DocInfo, Response } from '../../shared/types';
+import { t } from '../../shared/i18n';
 import { marked } from 'marked';
 import { reportProgress } from '../progress';
 import { resolveObjToken, fetchClientVars } from '../feishu-api';
@@ -15,7 +16,7 @@ import { downloadImageDataUrls } from '../image-map';
  * 图片下载后内联为 data URL，产出**单文件 HTML**，离线可读、可直接打印成 PDF。
  */
 export async function exportHtml(doc: DocInfo): Promise<Response> {
-  await reportProgress('html', 'running', '正在拉取文档内容...');
+  await reportProgress('html', 'running', t('progress.common.fetchingDoc'));
 
   try {
     const resolved = await resolveObjToken(doc);
@@ -30,18 +31,22 @@ export async function exportHtml(doc: DocInfo): Promise<Response> {
     for (const ref of sheetBlocks) {
       md = md
         .split(`feishu-sheet-block://${ref.blockId}`)
-        .join(`[查看内嵌表格](https://${doc.host}/sheets/${ref.shtToken}?sheet=${ref.subId})`);
+        .join(`[${t('progress.markdown.viewEmbeddedSheet')}](https://${doc.host}/sheets/${ref.shtToken}?sheet=${ref.subId})`);
     }
 
     // 下载图片 → token→URL 映射（成功内联 dataURL，失败降级在线 URL）
     const urlMap: Record<string, string> = {};
     if (images.length) {
-      await reportProgress('html', 'running', `正在下载 ${images.length} 张图片...`);
+      await reportProgress(
+        'html',
+        'running',
+        t('progress.common.downloadingImages', { n: images.length })
+      );
       const dataUrls = await downloadImageDataUrls(doc.host, images, (d, total) =>
         reportProgress(
           'html',
           'running',
-          `正在下载图片 ${d}/${total}...`,
+          t('progress.common.downloadingImage', { done: d, total }),
           Math.round((d / total) * 95)
         )
       );
@@ -52,7 +57,7 @@ export async function exportHtml(doc: DocInfo): Promise<Response> {
       }
     }
 
-    await reportProgress('html', 'running', '正在生成单文件 HTML...', 97);
+    await reportProgress('html', 'running', t('progress.html.generating'), 97);
     let body = await marked.parse(md);
     for (const [token, url] of Object.entries(urlMap)) {
       body = body.split(`feishu-asset://${token}`).join(url);
@@ -63,11 +68,11 @@ export async function exportHtml(doc: DocInfo): Promise<Response> {
       'data:text/html;charset=utf-8,' + encodeURIComponent(full),
       `${safeName(title)}.html`
     );
-    await reportProgress('html', 'success', 'HTML 导出完成', 100);
+    await reportProgress('html', 'success', t('progress.html.done'), 100);
     return { success: true };
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
-    await reportProgress('html', 'error', `HTML 导出失败：${msg}`);
+    await reportProgress('html', 'error', t('progress.html.failed', { msg }));
     return { success: false, error: msg };
   }
 }

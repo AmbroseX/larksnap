@@ -5,6 +5,7 @@
 import { useEffect, useState } from 'react';
 import { ISSUES_URL, MSG, REPO_URL } from '../shared/constants';
 import { sendToBackground } from '../shared/messaging';
+import { useI18n } from '../shared/i18n/useI18n';
 
 interface BridgeStatus {
   connected: boolean;
@@ -18,6 +19,7 @@ interface BridgeStatus {
 type Phase = 'loading' | 'connected' | 'connecting' | 'disconnected';
 
 export function Popup() {
+  const { t } = useI18n();
   const [status, setStatus] = useState<BridgeStatus | null>(null);
   const [copied, setCopied] = useState(false);
 
@@ -46,11 +48,14 @@ export function Popup() {
         : 'disconnected';
 
   const statusText = {
-    loading: 'Checking…',
-    connected: 'Connected to daemon',
-    connecting: 'Reconnecting…',
-    disconnected: 'No daemon connected',
+    loading: t('popup.status.loading'),
+    connected: t('popup.status.connected'),
+    connecting: t('popup.status.connecting'),
+    disconnected: t('popup.status.disconnected'),
   }[phase];
+
+  // 提示语里的 {cmd} 占位符切开渲染，保留 <code> 样式
+  const [hintPre, hintPost] = t('popup.connectHint').split('{cmd}');
 
   const copy = async () => {
     if (!status?.contextId) return;
@@ -79,7 +84,7 @@ export function Popup() {
     <div className="popup">
       <header className="hd">
         <img className="logo" src="icons/icon-32.png" alt="" />
-        <h1>飞书文档导出助手</h1>
+        <h1>{t('popup.title')}</h1>
         {status && <span className="ver">v{status.extensionVersion}</span>}
       </header>
 
@@ -97,35 +102,35 @@ export function Popup() {
             <span className="profile-label">Profile</span>
             <span className="profile-id">{status.contextId}</span>
             <button type="button" className={`copy-btn ${copied ? 'copied' : ''}`} onClick={copy}>
-              {copied ? 'Copied' : 'Copy'}
+              {copied ? t('common.copied') : t('common.copy')}
             </button>
           </div>
         )}
 
         {phase === 'connected' && status?.protocolMismatch && (
-          <div className="hint">
-            ⚠ 桥接协议版本不一致：请更新 larksnap-fetch 技能（或重新构建加载扩展），否则导出可能异常。
-          </div>
+          <div className="hint">{t('popup.protocolMismatch')}</div>
         )}
 
         {phase !== 'connected' && (
           <div className="hint">
-            在 CC 里运行 <code>/larksnap-fetch</code> 命令会自动拉起 daemon；扩展随后自动连上。点一下图标可立即唤醒后台。
+            {hintPre}
+            <code>/larksnap-fetch</code>
+            {hintPost}
           </div>
         )}
       </div>
 
       <footer className="ft">
         <button type="button" className="panel-btn" onClick={openSidePanel}>
-          打开侧边栏
+          {t('popup.openSidePanel')}
         </button>
         <span className="links">
           <a className="doc-link" href={REPO_URL} target="_blank" rel="noreferrer">
-            开源项目
+            {t('popup.repo')}
           </a>
           <span className="link-sep">·</span>
           <a className="doc-link" href={ISSUES_URL} target="_blank" rel="noreferrer">
-            反馈问题
+            {t('popup.feedback')}
           </a>
         </span>
       </footer>

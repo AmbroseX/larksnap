@@ -6,6 +6,8 @@
  * ClipboardItem 失败时降级 contenteditable + execCommand('copy')，
  * 这条老路天然产生 text/html 口味。
  */
+import { t } from '../shared/i18n';
+
 export async function copyHtmlToClipboard(html: string): Promise<void> {
   const plain = htmlToPlain(html);
   try {
@@ -41,7 +43,7 @@ export async function copyHtmlToClipboard(html: string): Promise<void> {
     sel?.removeAllRanges();
     div.remove();
   }
-  if (!ok) throw new Error('剪贴板写入失败，请保持侧边栏在前台后重试');
+  if (!ok) throw new Error(t('webcopy.clipboardFocusFailed'));
 }
 
 function htmlToPlain(html: string): string {

@@ -1,4 +1,5 @@
 import { MSG } from '../shared/constants';
+import type { TranslationKey } from '../shared/i18n';
 import {
   XHS_THEME_OPTIONS,
   WECHAT_THEME_OPTIONS,
@@ -9,10 +10,10 @@ import {
 export interface ActionItem {
   /** 唯一 key */
   key: string;
-  /** 标题 */
-  title: string;
-  /** 副标题 */
-  subtitle: string;
+  /** 标题（i18n 字典 key，渲染时经 t() 取文案） */
+  title: TranslationKey;
+  /** 副标题（i18n 字典 key） */
+  subtitle: TranslationKey;
   /** 点击发送给背景的消息类型；为空表示前端自行处理（如打开页面 / 视图切换） */
   msg?: string;
   /** 是否禁用（功能开发中） */
@@ -27,70 +28,70 @@ export interface ActionItem {
 export const ACTIONS: ActionItem[] = [
   {
     key: 'markdown',
-    title: '导出为 Markdown',
-    subtitle: '下载 .zip 压缩包到本地',
+    title: 'actions.markdown.title',
+    subtitle: 'actions.markdown.subtitle',
     msg: MSG.EXPORT_MARKDOWN,
   },
   {
     key: 'word',
-    title: '导出为 Word',
-    subtitle: '功能开发中',
+    title: 'actions.word.title',
+    subtitle: 'actions.word.subtitle',
     disabled: true,
   },
   {
     key: 'pdf',
-    title: '导出为 PDF',
-    subtitle: '自动渲染生成高清 PDF',
+    title: 'actions.pdf.title',
+    subtitle: 'actions.pdf.subtitle',
     msg: MSG.EXPORT_PDF,
   },
   {
     key: 'html',
-    title: '导出为 HTML',
-    subtitle: '下载完整网页文件',
+    title: 'actions.html.title',
+    subtitle: 'actions.html.subtitle',
     msg: MSG.EXPORT_HTML,
   },
   {
     key: 'xhs',
-    title: '导出为小红书卡片',
-    subtitle: '生成竖版图文卡片 PNG 压缩包',
+    title: 'actions.xhs.title',
+    subtitle: 'actions.xhs.subtitle',
     msg: MSG.EXPORT_XHS,
     themes: XHS_THEME_OPTIONS,
   },
   {
     key: 'wechat',
-    title: '复制为公众号格式',
-    subtitle: '复制后去公众号编辑器直接粘贴',
+    title: 'actions.wechat.title',
+    subtitle: 'actions.wechat.subtitle',
     msg: MSG.EXPORT_WECHAT,
     themes: WECHAT_THEME_OPTIONS,
   },
   {
     key: 'attachments',
-    title: '导出附件',
-    subtitle: '批量下载图片和文件',
+    title: 'actions.attachments.title',
+    subtitle: 'actions.attachments.subtitle',
     msg: MSG.EXPORT_ATTACHMENTS,
   },
   {
     key: 'cache',
-    title: '缓存到本地',
-    subtitle: '支持离线浏览文档',
+    title: 'actions.cache.title',
+    subtitle: 'actions.cache.subtitle',
     msg: MSG.CACHE_DOC,
   },
   {
     key: 'cacheList',
-    title: '查看缓存',
-    subtitle: '管理已缓存的文档',
+    title: 'actions.cacheList.title',
+    subtitle: 'actions.cacheList.subtitle',
     clientAction: 'cacheList',
   },
   {
     key: 'diagnostic',
-    title: '导出诊断信息',
-    subtitle: '定位私有化飞书格式差异',
+    title: 'actions.diagnostic.title',
+    subtitle: 'actions.diagnostic.subtitle',
     msg: MSG.EXPORT_DIAGNOSTIC,
   },
   {
     key: 'feedback',
-    title: '提交意见和问题',
-    subtitle: '反馈使用体验或遇到的错误',
+    title: 'actions.feedback.title',
+    subtitle: 'actions.feedback.subtitle',
     clientAction: 'feedback',
   },
 ];

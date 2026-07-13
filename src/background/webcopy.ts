@@ -6,6 +6,7 @@ import type {
   WebCopyState,
 } from '../shared/types';
 import { CONTENT_MSG } from '../shared/constants';
+import { ensureI18n, onLanguageChanged, t } from '../shared/i18n';
 import { getActiveTab } from './doc-detect';
 import { findAdapter, type AdapterExtractResult, type SiteAdapter } from './webcopy-adapters';
 import { track } from './analytics';
@@ -38,21 +39,23 @@ export function isRestrictedUrl(url: string): boolean {
   );
 }
 
-function registerMenus(): void {
+/** 菜单标题取当前语言，先等 i18n 就绪；removeAll+create 幂等，语言切换时重建 */
+async function registerMenus(): Promise<void> {
+  await ensureI18n();
   chrome.contextMenus.removeAll(() => {
     chrome.contextMenus.create({
       id: MENU_ID.PAGE_MD,
-      title: '整页转 Markdown（复制）',
+      title: t('menu.pageMd'),
       contexts: ['page'],
     });
     chrome.contextMenus.create({
       id: MENU_ID.SELECTION_MD,
-      title: '选中内容转 Markdown（复制）',
+      title: t('menu.selectionMd'),
       contexts: ['selection'],
     });
     chrome.contextMenus.create({
       id: MENU_ID.UNLOCK,
-      title: '解除复制限制（开/关）',
+      title: t('menu.unlock'),
       contexts: ['page', 'selection'],
     });
   });
@@ -60,11 +63,14 @@ function registerMenus(): void {
 
 /** SW 启动时调用一次。MV3 SW 会休眠重启，监听器必须在模块顶层同步注册。 */
 export function setupWebcopy(): void {
-  chrome.runtime.onInstalled.addListener(registerMenus);
-  chrome.runtime.onStartup.addListener(registerMenus);
+  chrome.runtime.onInstalled.addListener(() => void registerMenus());
+  chrome.runtime.onStartup.addListener(() => void registerMenus());
+  // 设置页切换语言 → 用新语言重建右键菜单
+  onLanguageChanged(() => void registerMenus());
 
   chrome.contextMenus.onClicked.addListener(async (info, tab) => {
     if (!tab?.id || !tab.url || isRestrictedUrl(tab.url)) return;
+    await ensureI18n();
     trackWebcopy(
       info.menuItemId === MENU_ID.PAGE_MD
         ? 'page'
@@ -80,7 +86,7 @@ export function setupWebcopy(): void {
           const result = await runAdapter(tab.id, adapter);
           if (result?.abort) {
             // 确定性失败（登录墙/风控/不存在）：提示原因，不退通用管线
-            await toastInMainWorld(tab.id, result.note || '页面无法抓取');
+            await toastInMainWorld(tab.id, result.note || t('bg.pageUnfetchable'));
             return;
           }
           if (result) {
@@ -148,15 +154,17 @@ async function toastInMainWorld(tabId: number, text: string): Promise<void> {
   });
 }
 
-/** 在页面主世界写剪贴板（右键菜单手势在页面里，navigator.clipboard 可用） */
+/** 在页面主世界写剪贴板（右键菜单手势在页面里，navigator.clipboard 可用）。
+ *  主世界函数拿不到 t()，提示文案序列化前算好随参数传入。 */
 async function copyInMainWorld(tabId: number, text: string): Promise<void> {
+  const doneText = t('toast.copiedAsMd');
   await chrome.scripting.executeScript({
     target: { tabId },
     world: 'MAIN',
-    func: (t: string) => {
+    func: (t: string, tip: string) => {
       const done = () => {
         const el = document.createElement('div');
-        el.textContent = '已复制为 Markdown';
+        el.textContent = tip;
         Object.assign(el.style, {
           position: 'fixed',
           right: '16px',
@@ -183,7 +191,7 @@ async function copyInMainWorld(tabId: number, text: string): Promise<void> {
         done();
       });
     },
-    args: [text],
+    args: [text, doneText],
   });
 }
 
@@ -195,7 +203,7 @@ export async function sendToTab<T = unknown>(
   const res = (await chrome.tabs.sendMessage(tabId, { type, data })) as
     | Response<T>
     | undefined;
-  return res ?? { success: false, error: 'content 无响应' };
+  return res ?? { success: false, error: t('bg.contentNoResponse') };
 }
 
 /**
@@ -208,10 +216,10 @@ async function withInjectedTab<T>(
 ): Promise<Response<T | WebCopyNeedsPermission>> {
   const tab = await getActiveTab();
   if (!tab?.id || !tab.url) {
-    return { success: false, error: '找不到当前标签页' };
+    return { success: false, error: t('bg.noActiveTab') };
   }
   if (isRestrictedUrl(tab.url)) {
-    return { success: false, error: '此页面不支持网页复制（浏览器保留页面）' };
+    return { success: false, error: t('bg.restrictedWebcopy') };
   }
   try {
     await injectWebcopy(tab.id);
@@ -219,7 +227,7 @@ async function withInjectedTab<T>(
     const host = new URL(tab.url).hostname;
     return {
       success: false,
-      error: '没有该页面的访问权限，请授权或改用右键菜单',
+      error: t('bg.noPermissionMenu'),
       data: { needsPermission: true, originPattern: `*://${host}/*` },
     };
   }
@@ -251,9 +259,9 @@ export async function webcopyPageMd(): Promise<
 > {
   trackWebcopy('page');
   const tab = await getActiveTab();
-  if (!tab?.id || !tab.url) return { success: false, error: '找不到当前标签页' };
+  if (!tab?.id || !tab.url) return { success: false, error: t('bg.noActiveTab') };
   if (isRestrictedUrl(tab.url)) {
-    return { success: false, error: '此页面不支持网页复制（浏览器保留页面）' };
+    return { success: false, error: t('bg.restrictedWebcopy') };
   }
 
   const adapter = findAdapter(tab.url);
@@ -262,7 +270,7 @@ export async function webcopyPageMd(): Promise<
       const result = await runAdapter(tab.id, adapter);
       if (result?.abort) {
         // 确定性失败（登录墙/风控/不存在）：回明确错误，不退通用管线
-        return { success: false, error: result.note || '页面无法抓取' };
+        return { success: false, error: result.note || t('bg.pageUnfetchable') };
       }
       if (result) return { success: true, data: result };
       // 适配器不适用此页：退回通用管线
@@ -270,7 +278,7 @@ export async function webcopyPageMd(): Promise<
       const host = new URL(tab.url).hostname;
       return {
         success: false,
-        error: '没有该页面的访问权限，请授权或改用右键菜单',
+        error: t('bg.noPermissionMenu'),
         data: { needsPermission: true, originPattern: `*://${host}/*` },
       };
     }
@@ -336,7 +344,7 @@ export async function copyTabs(
     .filter((t) => t.url && !t.url.startsWith('chrome'))
     .map((t) => formatTab(t, format));
   if (lines.length === 0) {
-    return { success: false, error: '没有可复制的标签页' };
+    return { success: false, error: t('bg.noTabsToCopy') };
   }
   return { success: true, data: { text: lines.join('\n'), count: lines.length } };
 }

@@ -1,4 +1,5 @@
 import type { DocInfo, Response } from '../../shared/types';
+import { t } from '../../shared/i18n';
 import { OFFSCREEN_MSG } from '../../shared/constants';
 import { reportProgress } from '../progress';
 import { resolveObjToken, fetchClientVars } from '../feishu-api';
@@ -20,39 +21,44 @@ export async function exportXhs(
   doc: DocInfo,
   themeId?: string
 ): Promise<Response<XhsExportResult>> {
-  await reportProgress('xhs', 'running', '正在拉取文档内容...');
+  await reportProgress('xhs', 'running', t('progress.common.fetchingDoc'));
 
   try {
     const resolved = await resolveObjToken(doc);
     const cv = await fetchClientVars(resolved);
     const data = (cv.data ?? {}) as Record<string, unknown>;
     const { nodes, images } = blocksToXhsNodes(data, resolved.objToken);
-    if (!nodes.length) throw new Error('文档没有可导出的内容');
+    if (!nodes.length) throw new Error(t('progress.xhs.empty'));
     const title = resolved.title || doc.title || doc.token;
 
     // 下载图片 → dataURL 映射；失败为 null，离屏页画占位灰块
     let imageMap: Record<string, string | null> = {};
     if (images.length) {
-      await reportProgress('xhs', 'running', `正在下载 ${images.length} 张图片...`, 5);
+      await reportProgress(
+        'xhs',
+        'running',
+        t('progress.common.downloadingImages', { n: images.length }),
+        5
+      );
       imageMap = await downloadImageDataUrls(doc.host, images, (d, total) =>
         reportProgress(
           'xhs',
           'running',
-          `正在下载图片 ${d}/${total}...`,
+          t('progress.common.downloadingImage', { done: d, total }),
           5 + Math.round((d / total) * 40)
         )
       );
     }
 
-    await reportProgress('xhs', 'running', '正在生成卡片...', 45);
+    await reportProgress('xhs', 'running', t('progress.xhs.rendering'), 45);
     const request: XhsRenderRequest = { title, nodes, imageMap, themeId };
     const pngs = await withOffscreen(() => renderInOffscreen(request));
 
-    await reportProgress('xhs', 'success', `已生成 ${pngs.length} 张卡片，请预览确认`, 100);
+    await reportProgress('xhs', 'success', t('progress.xhs.done', { n: pngs.length }), 100);
     return { success: true, data: { title, pngs } };
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
-    await reportProgress('xhs', 'error', `小红书卡片导出失败：${msg}`);
+    await reportProgress('xhs', 'error', t('progress.xhs.failed', { msg }));
     return { success: false, error: msg };
   }
 }
@@ -63,8 +69,8 @@ async function renderInOffscreen(request: XhsRenderRequest): Promise<string[]> {
     type: OFFSCREEN_MSG.XHS_RENDER,
     data: request,
   })) as Response<XhsRenderResult> | undefined;
-  if (!res) throw new Error('离屏渲染页无响应');
-  if (!res.success || !res.data) throw new Error(res.error || '离屏渲染失败');
-  if (!res.data.pngs.length) throw new Error('没有生成任何卡片');
+  if (!res) throw new Error(t('progress.xhs.offscreenNoResponse'));
+  if (!res.success || !res.data) throw new Error(res.error || t('progress.xhs.offscreenFailed'));
+  if (!res.data.pngs.length) throw new Error(t('progress.xhs.noCards'));
   return res.data.pngs;
 }

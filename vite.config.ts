@@ -49,6 +49,17 @@ export default defineConfig(({ mode }) => {
             tsconfig: resolve(__dirname, 'tsconfig.json'),
           });
 
+          // youtube 字幕抓取独立入口：只在 YouTube 视频页按需注入（004）
+          await esbuild({
+            entryPoints: [resolve(__dirname, 'src/content/youtube/index.ts')],
+            bundle: true,
+            format: 'iife',
+            outfile: resolve(distDir, 'youtube.js'),
+            sourcemap: isDev ? 'inline' : false,
+            target: 'chrome110',
+            tsconfig: resolve(__dirname, 'tsconfig.json'),
+          });
+
           // 读取 manifest 并写入 dist（把 background 入口换成编译后的 JS）
           const manifest = JSON.parse(
             readFileSync(resolve(__dirname, 'manifest.json'), 'utf-8')
@@ -91,6 +102,12 @@ export default defineConfig(({ mode }) => {
                 cpSync(resolve(iconsSrc, f), resolve(distDir, 'icons', f));
               }
             }
+          }
+
+          // 拷贝 _locales 到 dist（manifest 的 __MSG_*__ 与 default_locale 依赖它）
+          const localesSrc = resolve(__dirname, '_locales');
+          if (existsSync(localesSrc)) {
+            cpSync(localesSrc, resolve(distDir, '_locales'), { recursive: true });
           }
 
           // 代码混淆：默认关闭。Chrome 应用商店禁止上架混淆代码（minify 可以，

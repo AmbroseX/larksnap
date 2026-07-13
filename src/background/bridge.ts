@@ -8,8 +8,16 @@
 // 用 download sink 截获产物（zip/md 的 data URL）经 WS 回传；登录/授权缺失回 need-*。
 //
 // 端口/路径需与 skills/larksnap-fetch/scripts/bridge/protocol.mjs 保持一致。
-import type { DocInfo, ExportProgress, Response, WebCopyMdResult } from '../shared/types';
+import type {
+  DocInfo,
+  ExportProgress,
+  Response,
+  VideoQualityOption,
+  VideoRoute,
+  WebCopyMdResult,
+} from '../shared/types';
 import { CONTENT_MSG } from '../shared/constants';
+import { ensureI18n } from '../shared/i18n';
 import { detectDocFromUrl, stripSiteSuffix } from '../content/feishu-detect';
 import { hasPermissionForHost } from './permissions';
 import { setContentTab } from './feishu-proxy';
@@ -50,7 +58,7 @@ let contextId: string | null = null;
 
 /** daemon 推回来的视频任务事件 */
 export interface VideoJobEvent {
-  type: 'video-progress' | 'video-result' | 'video-error';
+  type: 'video-progress' | 'video-result' | 'video-error' | 'video-probe-result';
   id: string;
   percent?: number;
   message?: string;
@@ -58,11 +66,18 @@ export interface VideoJobEvent {
   file?: string;
   /** video-error：错误细分（dependency_missing / busy / bad_request） */
   subtype?: string;
+  /** video-probe-result：视频标题与可用清晰度档位 */
+  title?: string;
+  options?: VideoQualityOption[];
+  /** video-result / video-probe-result：本次实际成功的线路（按站点记忆用） */
+  route?: VideoRoute;
 }
 
 /** 发给 daemon 的视频任务参数 */
 export interface VideoJobRequest {
   url: string;
+  /** 画质封顶：best | 1080 | 720 | 480（daemon 白名单校验，非法值当 best） */
+  quality?: string;
   headers?: Record<string, string>;
   cookies?: Array<{
     domain: string;
@@ -72,6 +87,12 @@ export interface VideoJobRequest {
     secure: boolean;
     expires: number;
   }>;
+  /** 显式代理地址（http(s):// 或 socks5://）；缺省 = daemon 跟随系统代理环境变量 */
+  proxy?: string;
+  /** 首选线路（按站点记忆）；缺省 = 先代理后直连的历史顺序 */
+  route?: VideoRoute;
+  /** 命中「不代理列表」：强制直连且失败不切换 */
+  routeLocked?: boolean;
 }
 
 let videoSeq = 0;
@@ -157,7 +178,59 @@ export function requestVideoDownload(req: VideoJobRequest, onEvent: (ev: VideoJo
   if (!ready.ok || !ws) throw new Error(ready.reason || '桥接未就绪');
   const id = `v${++videoSeq}-${Date.now().toString(36)}`;
   videoPending.set(id, onEvent);
-  ws.send(JSON.stringify({ type: 'video-job', id, url: req.url, headers: req.headers, cookies: req.cookies }));
+  ws.send(
+    JSON.stringify({
+      type: 'video-job',
+      id,
+      url: req.url,
+      quality: req.quality,
+      headers: req.headers,
+      cookies: req.cookies,
+      proxy: req.proxy,
+      route: req.route,
+      routeLocked: req.routeLocked,
+    })
+  );
+}
+
+/**
+ * 探测当前视频可用清晰度（daemon 跑 yt-dlp -J）。超时按失败处理——
+ * 旧 daemon 不认识 video-probe 会静默丢弃，靠超时兜底而不是卡死。
+ */
+export function requestVideoProbe(
+  req: VideoJobRequest,
+  timeoutMs = 30_000
+): Promise<{ title?: string; options: VideoQualityOption[]; route?: VideoRoute }> {
+  const ready = videoBridgeReady();
+  if (!ready.ok || !ws) return Promise.reject(new Error(ready.reason || '桥接未就绪'));
+  const id = `p${++videoSeq}-${Date.now().toString(36)}`;
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      videoPending.delete(id);
+      reject(new Error('探测清晰度超时'));
+    }, timeoutMs);
+    videoPending.set(id, (ev) => {
+      if (ev.type === 'video-progress') return; // 探测无进度，防御性忽略
+      clearTimeout(timer);
+      if (ev.type === 'video-probe-result') {
+        resolve({ title: ev.title, options: ev.options ?? [], route: ev.route });
+      } else {
+        reject(new Error(ev.message || '探测清晰度失败'));
+      }
+    });
+    ws!.send(
+      JSON.stringify({
+        type: 'video-probe',
+        id,
+        url: req.url,
+        headers: req.headers,
+        cookies: req.cookies,
+        proxy: req.proxy,
+        route: req.route,
+        routeLocked: req.routeLocked,
+      })
+    );
+  });
 }
 
 /** 连接断开时收尾所有在途视频任务（daemon 侧也会杀掉对应 yt-dlp）。 */
@@ -300,8 +373,13 @@ async function onMessage(raw: string): Promise<void> {
     }
     return;
   }
-  // daemon 主动推回的视频任务事件（进度/结果/错误）→ 路由给发起方回调
-  if (msg.type === 'video-progress' || msg.type === 'video-result' || msg.type === 'video-error') {
+  // daemon 主动推回的视频任务事件（进度/结果/错误/探测结果）→ 路由给发起方回调
+  if (
+    msg.type === 'video-progress' ||
+    msg.type === 'video-result' ||
+    msg.type === 'video-error' ||
+    msg.type === 'video-probe-result'
+  ) {
     const ev = msg as unknown as VideoJobEvent;
     const cb = videoPending.get(ev.id);
     if (!cb) return;
@@ -344,6 +422,8 @@ async function runJob(job: Job): Promise<void> {
   let tabId: number | undefined;
   let artifact: { url: string; filename: string } | null = null;
   try {
+    // 远程任务会触发导出器的进度推送（侧边栏可见），先保证语言就绪
+    await ensureI18n();
     const info = detectDocFromUrl(job.url);
     if (!info.isFeishuDoc) {
       // 普通网页：走 webcopy 通用管线转 Markdown

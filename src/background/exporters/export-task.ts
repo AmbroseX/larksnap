@@ -1,3 +1,4 @@
+import { t } from '../../shared/i18n';
 import { createExportTask, fetchExportResult } from '../feishu-api';
 import { downloadMedia } from '../feishu-proxy';
 import { exportFileUrls } from '../media-util';
@@ -44,12 +45,12 @@ export async function runExportTask(
   const create = (await createExportTask(token, fileExtension)) as Json;
 
   if (isNotLoggedIn(create)) {
-    throw new NotLoggedInError('请先登录飞书后再导出');
+    throw new NotLoggedInError(t('bg.notLoggedIn'));
   }
   const ticket = create.data?.ticket as string | undefined;
   if (create.code !== 0 || !ticket) {
     throw new ExportDisabledError(
-      create.msg || `官方导出不可用（code ${create.code ?? '未知'}）`
+      create.msg || t('bg.officialUnavailable', { code: String(create.code ?? '?') })
     );
   }
 
@@ -65,7 +66,7 @@ export async function runExportTask(
     }
   }
   if (!result?.file_token) {
-    throw new Error('导出超时，请重试');
+    throw new Error(t('bg.exportTimeout'));
   }
 
   // 下载导出产物（download/all/{file_token}，下载域由 driveStreamHost 推导）

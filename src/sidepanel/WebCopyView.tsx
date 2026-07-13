@@ -1,15 +1,22 @@
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useRef } from 'react';
 import type {
+  ExportProgress,
   Response,
+  ScreenshotFormat,
+  VideoProbeResult,
+  VideoQualityOption,
   VideoState,
+  VideoTaskInfo,
   WebCopyConfig,
   WebCopyMdResult,
   WebCopyNeedsPermission,
   WebCopyState,
 } from '../shared/types';
 import { DEFAULT_CONFIG, MSG } from '../shared/constants';
-import { sendToBackground } from '../shared/messaging';
+import { onBackgroundMessage, sendToBackground } from '../shared/messaging';
 import { getConfig, saveConfig } from '../shared/storage';
+import { t } from '../shared/i18n';
+import { useI18n } from '../shared/i18n/useI18n';
 
 /**
  * 网页复制区块（非飞书页面的侧边栏主入口）。
@@ -26,7 +33,7 @@ async function callWebcopy<T>(type: string, data?: unknown): Promise<Response<T>
       .request({ origins: [fallback.originPattern] })
       .catch(() => false);
     if (!granted) {
-      return { success: false, error: '未授权该域名，可改用页面右键菜单操作' };
+      return { success: false, error: t('webcopy.notAuthorizedMenu') };
     }
     return (await sendToBackground<T>(type, data)) as Response<T>;
   }
@@ -41,7 +48,7 @@ function sanitizeFilename(name: string): string {
     .replace(/^[.\s]+|[.\s]+$/g, '')
     .slice(0, 100)
     .trim();
-  return n || '网页导出';
+  return n || t('webcopy.defaultFilename');
 }
 
 /**
@@ -49,6 +56,22 @@ function sanitizeFilename(name: string): string {
  * 不走 chrome.downloads —— 扩展页 + blob URL 下 filename 参数会被忽略，
  * 落下来变成 blob UUID 名（实测踩坑）。
  */
+/** 档位 → 展示名（2160→4K、1440→2K，60 帧档加标注）与 quality 参数值（如 '2160@60'） */
+function qualityLabel(o: VideoQualityOption): string {
+  const res = o.height >= 2160 ? '4K' : o.height >= 1440 ? '2K' : `${o.height}P`;
+  return o.fps ? `${res} ${t('webcopy.fps', { fps: o.fps })}` : res;
+}
+function qualityValue(o: VideoQualityOption): string {
+  return `${o.height}@${o.fps ?? 30}`;
+}
+
+/** 探测失败时的静态兜底档位 */
+const FALLBACK_QUALITIES: VideoQualityOption[] = [
+  { height: 1080, fps: null },
+  { height: 720, fps: null },
+  { height: 480, fps: null },
+];
+
 function downloadMarkdown(markdown: string, title: string): void {
   const url = URL.createObjectURL(new Blob([markdown], { type: 'text/markdown' }));
   const a = document.createElement('a');
@@ -62,7 +85,9 @@ function downloadMarkdown(markdown: string, title: string): void {
 }
 
 export function WebCopyView() {
-  const [status, setStatus] = useState('可将当前网页转为 Markdown');
+  useI18n(); // 订阅语言切换，切换时整块重渲染
+  /** null = 空闲态，渲染时取当前语言的默认提示 */
+  const [status, setStatus] = useState<string | null>(null);
   const [statusKind, setStatusKind] = useState<'idle' | 'success' | 'error'>('idle');
   const [busy, setBusy] = useState<string | null>(null);
   const [unlocked, setUnlocked] = useState(false);
@@ -73,6 +98,55 @@ export function WebCopyView() {
   const [video, setVideo] = useState<VideoState | null>(null);
   /** 下载可能持续几分钟，用独立 busy，不锁其他按钮 */
   const [videoBusy, setVideoBusy] = useState(false);
+  /** 画质封顶（'best' 或 '1080@60' 形态；探测结果变化时若失效会重置回 best） */
+  const [quality, setQuality] = useState('best');
+  /** 探测出的真实档位；null=探测中或未探测，失败用 FALLBACK_QUALITIES */
+  const [probed, setProbed] = useState<VideoQualityOption[] | null>(null);
+  const [probeFailed, setProbeFailed] = useState(false);
+  /** 整页截图进行中（滚动逐屏可能几秒到几十秒，独立 busy） */
+  const [shotBusy, setShotBusy] = useState(false);
+  /** 视频下载任务列表（SW 推送全量；有任务就显示，与当前页是否视频站无关） */
+  const [videoTasks, setVideoTasks] = useState<VideoTaskInfo[]>([]);
+  /** 本次下载线路：auto=名单/记忆自动决定；direct/proxy=强制。按站点记住上次选择 */
+  const [routeChoice, setRouteChoice] = useState<'auto' | 'direct' | 'proxy'>('auto');
+
+  /** 上次探测的视频地址：同一视频不重复探测；也用于丢弃换页后才回来的旧结果 */
+  const probeUrlRef = useRef<string | null>(null);
+
+  /** 查视频入口状态 + 需要时探测清晰度（面板打开、切标签页、页内跳转都会调） */
+  const refreshVideo = useCallback(async () => {
+    const res = await sendToBackground<VideoState>(MSG.GET_VIDEO_STATE);
+    if (!res.success || !res.data?.supported) {
+      setVideo(null);
+      probeUrlRef.current = null;
+      return;
+    }
+    setVideo(res.data);
+    if (!res.data.bridgeReady) return;
+    const url = res.data.url ?? '';
+    if (url === probeUrlRef.current) return; // 还是这个视频，沿用已探测档位
+    probeUrlRef.current = url;
+    setProbed(null);
+    setProbeFailed(false);
+    setQuality('best');
+    // 探测真实档位（yt-dlp -J，几秒）；失败退静态档位
+    const p = await sendToBackground<VideoProbeResult>(MSG.PROBE_VIDEO);
+    if (probeUrlRef.current !== url) return; // 期间又换页了，丢弃旧结果
+    if (p.success && p.data?.options.length) {
+      const opts = p.data.options;
+      setProbed(opts);
+      // 探测期间用户可能已在静态档位上选了分辨率：映射到真实档位里同高度的
+      // （优先普通帧率档），真实档位里没有这个高度则回到最高画质
+      setQuality((q) => {
+        if (q === 'best' || opts.some((o) => qualityValue(o) === q)) return q;
+        const h = Number(q.split('@')[0]);
+        const same = opts.filter((o) => o.height === h);
+        return same.length ? qualityValue(same.find((o) => !o.fps) ?? same[0]) : 'best';
+      });
+    } else {
+      setProbeFailed(true);
+    }
+  }, []);
 
   useEffect(() => {
     getConfig().then((cfg) => setWebcopyCfg(cfg.webcopy));
@@ -80,15 +154,82 @@ export function WebCopyView() {
     sendToBackground<WebCopyState>(MSG.WEBCOPY_GET_STATE).then((res) => {
       if (res.success && res.data) setUnlocked(res.data.unlocked);
     });
-    sendToBackground<VideoState>(MSG.GET_VIDEO_STATE).then((res) => {
-      if (res.success && res.data?.supported) setVideo(res.data);
-    });
-  }, []);
+    void refreshVideo();
+    // 切标签页 / 当前页地址变化（B 站是 SPA，换视频不刷新页面）→ 重新识别并探测
+    const onActivated = () => void refreshVideo();
+    const onUpdated = (
+      _tabId: number,
+      info: chrome.tabs.TabChangeInfo,
+      tab: chrome.tabs.Tab
+    ) => {
+      if (tab.active && (info.url || info.status === 'complete')) void refreshVideo();
+    };
+    chrome.tabs.onActivated.addListener(onActivated);
+    chrome.tabs.onUpdated.addListener(onUpdated);
+    return () => {
+      chrome.tabs.onActivated.removeListener(onActivated);
+      chrome.tabs.onUpdated.removeListener(onUpdated);
+    };
+  }, [refreshVideo]);
 
   const report = useCallback((ok: boolean, msg: string) => {
     setStatus(msg);
     setStatusKind(ok ? 'success' : 'error');
   }, []);
+
+  // 整页截图的逐屏/拼接进度经 PROGRESS 推送，映射到本区块状态栏
+  useEffect(() => {
+    return onBackgroundMessage((msg) => {
+      if (msg.type !== MSG.PROGRESS) return;
+      const p = msg.data as ExportProgress | undefined;
+      if (!p || p.action !== 'screenshot') return;
+      setStatus(p.message);
+      setStatusKind(p.status === 'error' ? 'error' : p.status === 'success' ? 'success' : 'idle');
+    });
+  }, []);
+
+  // 线路选择按站点记忆（localStorage）；换站点时恢复上次选择
+  useEffect(() => {
+    const site = video?.site;
+    if (!site) return;
+    const saved = localStorage.getItem(`larksnap:video-route-choice:${site}`);
+    setRouteChoice(saved === 'direct' || saved === 'proxy' ? saved : 'auto');
+  }, [video?.site]);
+
+  const pickRoute = (r: 'auto' | 'direct' | 'proxy') => {
+    setRouteChoice(r);
+    if (video?.site) localStorage.setItem(`larksnap:video-route-choice:${video.site}`, r);
+  };
+
+  // 下载任务列表：打开时拉一次全量，之后靠 SW 推送保持同步
+  useEffect(() => {
+    sendToBackground<VideoTaskInfo[]>(MSG.LIST_VIDEO_TASKS).then((res) => {
+      if (res.success && res.data) setVideoTasks(res.data);
+    });
+    return onBackgroundMessage((msg) => {
+      if (msg.type !== MSG.VIDEO_TASKS) return;
+      setVideoTasks((msg.data as VideoTaskInfo[]) ?? []);
+    });
+  }, []);
+
+  /** 整页截图：滚动逐屏抓取在 SW 完成，产物直接落盘到下载目录 */
+  const handleScreenshot = async (format: ScreenshotFormat) => {
+    if (shotBusy || busy) return;
+    setShotBusy(true);
+    setStatusKind('idle');
+    setStatus(t('webcopy.screenshot.preparing'));
+    try {
+      const res = await sendToBackground<{ truncated?: boolean }>(MSG.EXPORT_SCREENSHOT, {
+        format,
+      });
+      if (!res.success) report(false, res.error || t('webcopy.screenshot.failed'));
+      // 成功文案由 PROGRESS 的 success 消息给出（含截断提示），此处不覆盖
+    } catch (e) {
+      report(false, e instanceof Error ? e.message : String(e));
+    } finally {
+      setShotBusy(false);
+    }
+  };
 
   /**
    * 侧边栏自己写剪贴板。
@@ -124,7 +265,7 @@ export function WebCopyView() {
         report(true, okMsg);
       } else {
         setPreview(text);
-        report(false, '剪贴板写入失败，请在下方手动复制');
+        report(false, t('webcopy.clipboardFailed'));
       }
     },
     [report]
@@ -135,7 +276,7 @@ export function WebCopyView() {
       if (busy) return;
       setBusy(key);
       setStatusKind('idle');
-      setStatus('执行中...');
+      setStatus(t('webcopy.executing'));
       try {
         await task();
       } catch (e) {
@@ -151,15 +292,23 @@ export function WebCopyView() {
     run(`page-${mode}`, async () => {
       const res = await callWebcopy<WebCopyMdResult>(MSG.WEBCOPY_PAGE_MD, { mode });
       if (!res.success || !res.data) {
-        report(false, res.error || '转换失败');
+        report(false, res.error || t('webcopy.convertFailed'));
         return;
       }
-      const { markdown, title } = res.data;
+      const { markdown, title, degraded } = res.data;
+      // 提取器没命中、走了兜底链：产物可用但可能混入页面噪音，提示一句
+      const hint = degraded ? t('webcopy.pageMd.degradedHint') : '';
       if (mode === 'copy') {
-        await copyText(markdown, `已复制整页 Markdown（${markdown.length} 字符）`);
+        await copyText(
+          markdown,
+          t('webcopy.pageMd.copiedPage', { count: markdown.length, hint })
+        );
       } else {
         downloadMarkdown(markdown, title);
-        report(true, `已下载「${sanitizeFilename(title)}.md」`);
+        report(
+          true,
+          t('webcopy.pageMd.downloaded', { name: `${sanitizeFilename(title)}.md`, hint })
+        );
       }
     });
 
@@ -167,10 +316,10 @@ export function WebCopyView() {
     run('selection', async () => {
       const res = await callWebcopy<WebCopyMdResult>(MSG.WEBCOPY_SELECTION_MD);
       if (!res.success || !res.data) {
-        report(false, res.error || '转换失败');
+        report(false, res.error || t('webcopy.convertFailed'));
         return;
       }
-      await copyText(res.data.markdown, '已复制选中内容的 Markdown');
+      await copyText(res.data.markdown, t('webcopy.pageMd.copiedSelection'));
     });
 
   const handleToggleUnlock = () =>
@@ -181,11 +330,11 @@ export function WebCopyView() {
         { enabled: next }
       );
       if (!res.success || !res.data) {
-        report(false, res.error || '操作失败');
+        report(false, res.error || t('webcopy.actionFailed'));
         return;
       }
       setUnlocked(res.data.enabled);
-      report(true, res.data.enabled ? '已解除复制限制' : '已恢复页面原状');
+      report(true, res.data.enabled ? t('webcopy.unlock.on') : t('webcopy.unlock.off'));
     });
 
   const handleCopyTabs = (scope: 'current' | 'all') =>
@@ -198,35 +347,44 @@ export function WebCopyView() {
         }
       );
       if (!res.success || !res.data) {
-        report(false, res.error || '复制失败');
+        report(false, res.error || t('webcopy.copyFailed'));
         return;
       }
       await copyText(
         res.data.text,
         scope === 'current'
-          ? '已复制本页 Markdown 链接'
-          : `已复制 ${res.data.count} 个标签页`
+          ? t('webcopy.tabs.copiedCurrent')
+          : t('webcopy.tabs.copiedAll', { count: res.data.count })
       );
     });
 
-  /** 下载视频：任务在本地 daemon 跑 yt-dlp，进度显示在底部状态栏（PROGRESS 推送） */
+  /**
+   * 下载视频：入队即返回（SW 排队、daemon 最多 2 个并发），
+   * 进度看下方任务列表（VIDEO_TASKS 推送），按钮不再锁到下载结束。
+   */
   const handleDownloadVideo = async () => {
     if (videoBusy) return;
     setVideoBusy(true);
     setStatusKind('idle');
-    setStatus('正在发起视频下载，进度见底部状态栏…');
     try {
-      const res = await sendToBackground<{ file?: string }>(MSG.DOWNLOAD_VIDEO);
+      const res = await sendToBackground<{ taskId: string }>(MSG.DOWNLOAD_VIDEO, {
+        quality,
+        route: routeChoice,
+      });
       if (res.success) {
-        report(true, res.data?.file ? `视频已保存：${res.data.file}` : '视频下载完成');
+        report(true, t('webcopy.video.queued'));
       } else {
-        report(false, res.error || '下载失败');
+        report(false, res.error || t('webcopy.video.failed'));
       }
     } catch (e) {
       report(false, e instanceof Error ? e.message : String(e));
     } finally {
       setVideoBusy(false);
     }
+  };
+
+  const handleClearTasks = async () => {
+    await sendToBackground(MSG.CLEAR_VIDEO_TASKS);
   };
 
   const handleToggleAutoCopy = () =>
@@ -240,11 +398,11 @@ export function WebCopyView() {
         report(
           true,
           res.success
-            ? '自动复制已开启（当前标签页已生效）'
-            : '自动复制已开启，当前页未激活：' + (res.error || '')
+            ? t('webcopy.autoCopy.on')
+            : t('webcopy.autoCopy.onNotActive', { err: res.error || '' })
         );
       } else {
-        report(true, '自动复制已关闭');
+        report(true, t('webcopy.autoCopy.off'));
       }
     });
 
@@ -252,52 +410,155 @@ export function WebCopyView() {
     <div className="webcopy">
       {video?.supported && (
         <div className="wc-card">
-          <div className="wc-card-title">下载视频</div>
+          <div className="wc-card-title">{t('webcopy.video.title')}</div>
+          {/* 选择器常显：探测中先给静态档位可选，真实档位回来后无缝替换（已选高度会自动映射） */}
+          <div className="theme-picker">
+            {[
+              { value: 'best', label: t('webcopy.video.best') },
+              ...(probed ?? FALLBACK_QUALITIES).map((o) => ({
+                // 探测档带 @fps 精确封顶；兜底档只封分辨率（不知道有没有 60 帧变体）
+                value: probed ? qualityValue(o) : String(o.height),
+                label: qualityLabel(o),
+              })),
+            ].map((q) => (
+              <button
+                key={q.value}
+                className={`theme-chip${quality === q.value ? ' selected' : ''}`}
+                disabled={videoBusy}
+                onClick={() => setQuality(q.value)}
+              >
+                {q.label}
+              </button>
+            ))}
+          </div>
+          {video.bridgeReady && probed == null && !probeFailed && (
+            <div className="wc-row-sub">{t('webcopy.video.probing')}</div>
+          )}
           <div className="wc-btn-row">
             <button
               className="wc-btn primary"
               disabled={videoBusy || !video.bridgeReady}
               onClick={handleDownloadVideo}
             >
-              {videoBusy ? '下载中…' : '下载当前视频'}
+              {videoBusy ? t('webcopy.video.downloading') : t('webcopy.video.download')}
             </button>
+            <div className="wc-route-picker">
+              {(
+                [
+                  { value: 'auto', label: t('webcopy.video.routeAuto') },
+                  { value: 'proxy', label: t('webcopy.video.routeProxy') },
+                  { value: 'direct', label: t('webcopy.video.routeDirect') },
+                ] as const
+              ).map((r) => (
+                <button
+                  key={r.value}
+                  className={`theme-chip${routeChoice === r.value ? ' selected' : ''}`}
+                  title={t('webcopy.video.routeTitle')}
+                  onClick={() => pickRoute(r.value)}
+                >
+                  {r.label}
+                </button>
+              ))}
+            </div>
           </div>
           <div className="wc-row-sub">
             {video.bridgeReady
-              ? '由本地 yt-dlp 下载到「下载/larksnap-video」文件夹'
-              : video.reason || '本地 daemon 未就绪'}
+              ? t('webcopy.video.savedTo')
+              : video.reason || t('webcopy.video.daemonNotReady')}
           </div>
         </div>
       )}
 
+      {videoTasks.length > 0 && (
+        <div className="wc-card">
+          <div className="wc-card-title wc-task-head-row">
+            {t('webcopy.video.tasksTitle')}
+            {videoTasks.some((x) => x.status === 'success' || x.status === 'error') && (
+              <button className="wc-task-clear" onClick={handleClearTasks}>
+                {t('webcopy.video.clearDone')}
+              </button>
+            )}
+          </div>
+          {videoTasks.map((task) => (
+            <div key={task.id} className="wc-task">
+              <div className="wc-task-line">
+                <span className={`wc-task-status ${task.status}`}>
+                  {
+                    {
+                      queued: t('webcopy.video.statusQueued'),
+                      running: t('webcopy.video.statusRunning'),
+                      success: t('webcopy.video.statusSuccess'),
+                      error: t('webcopy.video.statusError'),
+                    }[task.status]
+                  }
+                </span>
+                <span className="wc-task-title" title={task.url}>
+                  {task.title}
+                </span>
+                {task.status === 'running' && (
+                  <span className="wc-task-pct">{task.percent ?? 0}%</span>
+                )}
+              </div>
+              {task.message && (
+                <div className={`wc-task-msg${task.status === 'error' ? ' error' : ''}`}>
+                  {task.message}
+                </div>
+              )}
+            </div>
+          ))}
+          <div className="wc-row-sub">{t('webcopy.video.logHint')}</div>
+        </div>
+      )}
+
       <div className="wc-card">
-        <div className="wc-card-title">整页转 Markdown</div>
+        <div className="wc-card-title">{t('webcopy.pageMd.title')}</div>
         <div className="wc-btn-row">
           <button
             className="wc-btn primary"
             disabled={!!busy}
             onClick={() => handlePageMd('copy')}
           >
-            复制
+            {t('webcopy.pageMd.copy')}
           </button>
           <button
             className="wc-btn"
             disabled={!!busy}
             onClick={() => handlePageMd('download')}
           >
-            下载 .md
+            {t('webcopy.pageMd.download')}
           </button>
           <button className="wc-btn" disabled={!!busy} onClick={handleSelectionMd}>
-            仅选中内容
+            {t('webcopy.pageMd.selectionOnly')}
           </button>
         </div>
       </div>
 
       <div className="wc-card">
+        <div className="wc-card-title">{t('webcopy.screenshot.title')}</div>
+        <div className="wc-btn-row">
+          <button
+            className="wc-btn primary"
+            disabled={shotBusy || !!busy}
+            onClick={() => handleScreenshot('png')}
+          >
+            {shotBusy ? t('webcopy.screenshot.shooting') : t('webcopy.screenshot.png')}
+          </button>
+          <button
+            className="wc-btn"
+            disabled={shotBusy || !!busy}
+            onClick={() => handleScreenshot('pdf')}
+          >
+            {t('webcopy.screenshot.pdf')}
+          </button>
+        </div>
+        <div className="wc-row-sub">{t('webcopy.screenshot.sub')}</div>
+      </div>
+
+      <div className="wc-card">
         <label className="wc-toggle-row">
           <span>
-            <span className="wc-row-title">解除复制限制</span>
-            <span className="wc-row-sub">禁止选择/复制/右键的页面一键解锁</span>
+            <span className="wc-row-title">{t('webcopy.unlock.title')}</span>
+            <span className="wc-row-sub">{t('webcopy.unlock.sub')}</span>
           </span>
           <input
             type="checkbox"
@@ -308,9 +569,9 @@ export function WebCopyView() {
         </label>
         <label className="wc-toggle-row">
           <span>
-            <span className="wc-row-title">选中文字自动复制</span>
+            <span className="wc-row-title">{t('webcopy.autoCopy.title')}</span>
             <span className="wc-row-sub">
-              选中 ≥{webcopyCfg.autoCopyMinChars} 字自动进剪贴板（本页会话级）
+              {t('webcopy.autoCopy.sub', { n: webcopyCfg.autoCopyMinChars })}
             </span>
           </span>
           <input
@@ -323,30 +584,32 @@ export function WebCopyView() {
       </div>
 
       <div className="wc-card">
-        <div className="wc-card-title">标签页链接</div>
+        <div className="wc-card-title">{t('webcopy.tabs.title')}</div>
         <div className="wc-btn-row">
           <button
             className="wc-btn"
             disabled={!!busy}
             onClick={() => handleCopyTabs('current')}
           >
-            复制本页链接(MD)
+            {t('webcopy.tabs.copyCurrent')}
           </button>
           <button
             className="wc-btn"
             disabled={!!busy}
             onClick={() => handleCopyTabs('all')}
           >
-            复制全部标签页
+            {t('webcopy.tabs.copyAll')}
           </button>
         </div>
       </div>
 
-      <div className={`wc-status wc-status-${statusKind}`}>{status}</div>
+      <div className={`wc-status wc-status-${statusKind}`}>
+        {status ?? t('webcopy.idle')}
+      </div>
 
       {preview != null && (
         <div className="wc-card">
-          <div className="wc-card-title">转换结果（手动复制）</div>
+          <div className="wc-card-title">{t('webcopy.resultTitle')}</div>
           <textarea
             className="wc-preview"
             readOnly

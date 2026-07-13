@@ -1,5 +1,6 @@
 import type { DocInfo, Message, Response, TrackEvent } from '../shared/types';
 import { MSG, OFFSCREEN_MSG } from '../shared/constants';
+import { ensureI18n, t, type TranslationKey } from '../shared/i18n';
 import { getRuntimeState } from '../shared/storage';
 import { detectActiveDoc } from './doc-detect';
 import { getSnapshot } from './feishu-proxy';
@@ -11,16 +12,34 @@ import { exportHtml } from './exporters/html';
 import { exportAttachments } from './exporters/attachments';
 import { exportXhs } from './exporters/xhs';
 import { exportWechat } from './exporters/wechat';
+import { exportScreenshot } from './exporters/screenshot';
 import type { XhsRenderProgress } from './xhs/types';
+import type { ScreenshotFormat, ShotStitchProgress } from '../shared/types';
 import { cacheDoc, listCache, removeCache, getCache } from './cache-manager';
 import { exportDiagnostic } from './diagnostic';
 import { getCookie } from './cookie';
 import { hasPermissionForHost, recordTrusted, revokePermission, listTrusted } from './permissions';
 import { startBridge, getBridgeStatus } from './bridge';
-import { getVideoState, downloadVideo } from './video';
+import {
+  getVideoState,
+  probeVideo,
+  downloadVideo,
+  listVideoTasks,
+  clearVideoTasks,
+} from './video';
 import { track, initAnalytics } from './analytics';
 import {
+  exportTranscript,
+  listCaptionTracks,
+  isYoutubeWatchUrl,
+} from './exporters/transcript';
+import { summarizePage } from './summarize';
+import type { PageKind, SummaryResult } from '../shared/types';
+import { detectDocFromUrl } from '../content/feishu-detect';
+import { getActiveTab } from './doc-detect';
+import {
   setupWebcopy,
+  isRestrictedUrl,
   webcopyPageMd,
   webcopySelectionMd,
   webcopyToggleUnlock,
@@ -31,6 +50,9 @@ import {
 import type { TabCopyFormat } from '../shared/types';
 
 console.log('[larksnap] Service Worker 启动');
+
+// i18n：尽早开始初始化（幂等单例）；所有产生用户文案的入口各自 await ensureI18n()
+void ensureI18n();
 
 // CC ⇄ 扩展 桥接：连原生宿主、长连保活、接收远程导出任务
 startBridge();
@@ -62,6 +84,8 @@ async function handleMessage(
   message: Message,
   sender: chrome.runtime.MessageSender
 ): Promise<Response> {
+  // 所有响应文案（错误/进度）都可能面向用户，先保证语言就绪
+  await ensureI18n();
   switch (message.type) {
     case MSG.GET_STATUS: {
       const state = await getRuntimeState();
@@ -81,7 +105,7 @@ async function handleMessage(
     case MSG.GET_COOKIE: {
       const { name } = (message.data || {}) as { name?: string };
       const url = sender.tab?.url || '';
-      if (!name) return { success: false, error: '缺少 cookie 名' };
+      if (!name) return { success: false, error: t('bg.missingCookieName') };
       const value = await getCookie(name, url);
       return { success: true, data: value };
     }
@@ -99,7 +123,7 @@ async function handleMessage(
     }
     case MSG.REVOKE_PERMISSION: {
       const { pattern } = (message.data || {}) as { pattern?: string };
-      if (!pattern) return { success: false, error: '缺少授权项' };
+      if (!pattern) return { success: false, error: t('bg.missingPermissionPattern') };
       return { success: true, data: await revokePermission(pattern) };
     }
     case MSG.LIST_TRUSTED: {
@@ -119,8 +143,8 @@ async function handleMessage(
     }
 
     case MSG.EXPORT_WORD: {
-      await reportProgress('word', 'error', 'Word 导出功能开发中');
-      return { success: false, error: 'Word 导出功能开发中' };
+      await reportProgress('word', 'error', t('progress.word.wip'));
+      return { success: false, error: t('progress.word.wip') };
     }
 
     case MSG.EXPORT_PDF: {
@@ -151,6 +175,27 @@ async function handleMessage(
       );
     }
 
+    // ---------- 整页截图（任意网页长图，与飞书通道解耦） ----------
+    case MSG.EXPORT_SCREENSHOT: {
+      const { format } = (message.data || {}) as { format?: ScreenshotFormat };
+      const fmt: ScreenshotFormat = format === 'pdf' ? 'pdf' : 'png';
+      return trackedExport('screenshot', () => exportScreenshot(fmt));
+    }
+
+    // offscreen 页逐屏拼接进度，转成统一进度推给侧边栏
+    case OFFSCREEN_MSG.SHOT_PROGRESS: {
+      const { done, total } = (message.data ?? {}) as ShotStitchProgress;
+      if (done && total) {
+        await reportProgress(
+          'screenshot',
+          'running',
+          t('progress.screenshot.stitchingProgress', { done, total }),
+          90 + Math.round((done / total) * 8)
+        );
+      }
+      return { success: true };
+    }
+
     // offscreen 页逐张卡片的渲染进度，转成统一进度推给侧边栏
     case OFFSCREEN_MSG.XHS_PROGRESS: {
       const { done, total } = (message.data ?? {}) as XhsRenderProgress;
@@ -158,7 +203,7 @@ async function handleMessage(
         await reportProgress(
           'xhs',
           'running',
-          `正在生成卡片 ${done}/${total}...`,
+          t('progress.xhs.renderingProgress', { done, total }),
           45 + Math.round((done / total) * 50)
         );
       }
@@ -189,13 +234,13 @@ async function handleMessage(
 
     case MSG.CACHE_GET: {
       const { token } = (message.data || {}) as { token?: string };
-      if (!token) return { success: false, error: '缺少 token' };
+      if (!token) return { success: false, error: t('bg.missingToken') };
       return getCache(token);
     }
 
     case MSG.CACHE_DELETE: {
       const { token } = (message.data || {}) as { token?: string };
-      if (!token) return { success: false, error: '缺少 token' };
+      if (!token) return { success: false, error: t('bg.missingToken') };
       return removeCache(token);
     }
 
@@ -208,8 +253,21 @@ async function handleMessage(
     case MSG.GET_VIDEO_STATE: {
       return getVideoState();
     }
+    case MSG.PROBE_VIDEO: {
+      return probeVideo();
+    }
     case MSG.DOWNLOAD_VIDEO: {
-      return downloadVideo();
+      const { quality, route } = (message.data || {}) as {
+        quality?: string;
+        route?: 'auto' | 'direct' | 'proxy';
+      };
+      return downloadVideo(quality, route);
+    }
+    case MSG.LIST_VIDEO_TASKS: {
+      return { success: true, data: listVideoTasks() };
+    }
+    case MSG.CLEAR_VIDEO_TASKS: {
+      return clearVideoTasks();
     }
 
     // ---------- 网页复制（webcopy） ----------
@@ -237,6 +295,53 @@ async function handleMessage(
       return copyTabs(scope ?? 'all', format ?? 'markdown');
     }
 
+    // ---------- YouTube 字幕 + AI 总结（004） ----------
+    // 页面类型三态：feishu 走现有导出 / youtube 出字幕+总结入口 / generic 出总结入口
+    case MSG.GET_PAGE_KIND: {
+      const tab = await getActiveTab();
+      const url = tab?.url || '';
+      let kind: PageKind;
+      if (!url || isRestrictedUrl(url)) kind = 'restricted';
+      else if (detectDocFromUrl(url).isFeishuDoc) kind = 'feishu';
+      else if (isYoutubeWatchUrl(url)) kind = 'youtube';
+      else kind = 'generic';
+      return { success: true, data: { kind, url } };
+    }
+
+    case MSG.LIST_CAPTION_TRACKS: {
+      return listCaptionTracks();
+    }
+
+    case MSG.EXPORT_TRANSCRIPT: {
+      const { lang, mode } = (message.data || {}) as {
+        lang?: string;
+        mode?: 'download' | 'copy';
+      };
+      return trackedExport('transcript', () =>
+        exportTranscript(lang, mode === 'copy' ? 'copy' : 'download')
+      );
+    }
+
+    case MSG.SUMMARIZE_PAGE: {
+      // 统计只报枚举/数值 {kind, ok, chunks, secs}，绝不含内容/URL/端点（FR-006）
+      const started = Date.now();
+      const res = await summarizePage();
+      const data = res.data as (SummaryResult & { needsAck?: boolean }) | undefined;
+      if (!data?.needsAck) {
+        void track({
+          name: 'summarize',
+          url: '/summarize',
+          data: {
+            kind: data?.kind ?? 'page',
+            ok: !!res.success,
+            chunks: data?.chunks ?? 0,
+            secs: Math.round((Date.now() - started) / 1000),
+          },
+        });
+      }
+      return res;
+    }
+
     // ---------- 匿名统计（UI 页面转发，SW 统一收口） ----------
     case MSG.TRACK: {
       void track(message.data as TrackEvent);
@@ -244,7 +349,7 @@ async function handleMessage(
     }
 
     default:
-      return { success: false, error: `未知消息类型: ${message.type}` };
+      return { success: false, error: t('bg.unknownMessage', { type: message.type }) };
   }
 }
 
@@ -254,21 +359,24 @@ async function handleMessage(
  * 但 PDF/HTML/附件对表格仍不适用，由各自 handler 单独挡（见 blockSheetOnly）。
  * 详见 docs/plans/2026-07-03-sheets导出适配研究.md
  */
-const UNSUPPORTED_EXPORT_TYPES: Partial<Record<DocInfo['docType'], string>> = {
-  base: '多维表格',
+const UNSUPPORTED_EXPORT_TYPES: Partial<Record<DocInfo['docType'], TranslationKey>> = {
+  base: 'bg.docTypeBase',
 };
 
 /** 校验文档是否就绪（已识别 + 已授权 + 类型可导出），否则返回错误 Response */
 function requireReady(doc: DocInfo | null): Response | null {
   if (!doc || !doc.isFeishuDoc) {
-    return { success: false, error: '无法识别当前页面，请在飞书文档页面操作' };
+    return { success: false, error: t('bg.notFeishuPage') };
   }
   if (doc.needsAuth) {
-    return { success: false, error: '检测到私有化飞书，请先在侧边栏授权访问该域名' };
+    return { success: false, error: t('bg.privateNeedsAuth') };
   }
   const unsupported = UNSUPPORTED_EXPORT_TYPES[doc.docType];
   if (unsupported) {
-    return { success: false, error: `暂不支持导出${unsupported}，当前仅支持文档（docx/wiki）与电子表格` };
+    return {
+      success: false,
+      error: t('bg.unsupportedDocType', { type: t(unsupported) }),
+    };
   }
   return null;
 }
@@ -297,7 +405,7 @@ function blockSheetOnly(doc: DocInfo): Response | null {
   if (doc.docType === 'sheets') {
     return {
       success: false,
-      error: '电子表格暂只支持导出 Markdown（含 CSV），PDF / HTML / 附件不适用',
+      error: t('bg.sheetOnlyMarkdown'),
     };
   }
   return null;

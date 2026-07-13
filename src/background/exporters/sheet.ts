@@ -1,4 +1,5 @@
 import type { DocInfo, EmbeddedSheetRef, Response } from '../../shared/types';
+import { t } from '../../shared/i18n';
 import { reportProgress } from '../progress';
 import { resolveTargetTabId } from '../feishu-proxy';
 import { createZipDataUrl, type ZipFile } from '../zip';
@@ -35,7 +36,7 @@ interface Workbook {
 
 export async function exportSheet(doc: DocInfo): Promise<Response> {
   try {
-    await reportProgress('markdown', 'running', '正在读取表格数据（页面内存）...', 20);
+    await reportProgress('markdown', 'running', t('progress.sheet.reading'), 20);
     const tabId = await resolveTargetTabId();
 
     const [{ result } = { result: undefined }] =
@@ -47,29 +48,29 @@ export async function exportSheet(doc: DocInfo): Promise<Response> {
     const wb = result as Workbook | undefined;
 
     if (!wb || wb.error) {
-      const msg = wb?.error || '未能读取到表格数据（页面可能未加载完成）';
+      const msg = wb?.error || t('progress.sheet.readFailed');
       await reportProgress('markdown', 'error', msg, 100);
       return { success: false, error: msg };
     }
     const sheets = wb.sheets.filter((s) => s.rows.length > 0);
     if (sheets.length === 0) {
-      const msg = '表格是空的，或未读到任何单元格';
+      const msg = t('progress.sheet.empty');
       await reportProgress('markdown', 'error', msg, 100);
       return { success: false, error: msg };
     }
 
-    await reportProgress('markdown', 'running', '正在转换为 Markdown / CSV...', 70);
+    await reportProgress('markdown', 'running', t('progress.sheet.converting'), 70);
     const title = wb.title || doc.title || doc.token;
     const files = buildFiles(title, sheets);
 
-    await reportProgress('markdown', 'running', '正在打包...', 90);
+    await reportProgress('markdown', 'running', t('progress.sheet.packing'), 90);
     const zipUrl = await createZipDataUrl(files);
     await downloadDataUrl(zipUrl, `${safeName(title)}.zip`);
 
     await reportProgress(
       'markdown',
       'success',
-      `表格导出完成（${sheets.length} 张表）`,
+      t('progress.sheet.done', { n: sheets.length }),
       100
     );
     return { success: true };
@@ -115,7 +116,7 @@ function toMarkdown(title: string, sheets: SheetData[]): string {
  * （docx 内嵌 sheet 块的替换也用它，勿改成私有）
  */
 export function sheetToMdTable(rows: string[][]): string {
-  if (rows.length === 0) return '（空表）';
+  if (rows.length === 0) return t('progress.sheet.emptyTable');
   const cols = Math.max(...rows.map((r) => r.length));
   const cell = (v: string) =>
     (v ?? '').replace(/\|/g, '\\|').replace(/\r?\n/g, '<br>');

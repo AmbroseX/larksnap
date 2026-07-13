@@ -1,4 +1,5 @@
 import type { Block, MediaAsset } from '../../shared/types';
+import { t as i18n } from '../../shared/i18n';
 import { buildBlockTree, type BlockTree } from '../convert/adapter';
 import { inlineToHtml, escapeHtml } from '../convert/inline-html';
 import { plainText } from '../convert/apool';
@@ -108,7 +109,7 @@ function walkBlock(id: string, depth: number, ordinal: number, ctx: Ctx): void {
       return;
 
     case type === 'sheet':
-      ctx.out.push({ type: 'placeholder', html: '内嵌表格：请到原文档查看' });
+      ctx.out.push({ type: 'placeholder', html: i18n('artifacts.xhs.embeddedSheet') });
       return;
 
     default: {
@@ -118,7 +119,7 @@ function walkBlock(id: string, depth: number, ordinal: number, ctx: Ctx): void {
       const before = ctx.out.length;
       walkList(block.children, depth, ctx);
       if (!html.trim() && ctx.out.length === before) {
-        ctx.out.push({ type: 'placeholder', html: `暂不支持的块类型：${escapeHtml(type)}` });
+        ctx.out.push({ type: 'placeholder', html: i18n('artifacts.xhs.unsupportedBlock', { type: escapeHtml(type) }) });
       }
       return;
     }
@@ -185,7 +186,7 @@ function emitTable(block: Block, depth: number, ctx: Ctx): void {
   >;
 
   if (!rowIds.length || !colIds.length) {
-    ctx.out.push({ type: 'placeholder', html: '表格：结构无法识别，已降级为顺序文本' });
+    ctx.out.push({ type: 'placeholder', html: i18n('artifacts.xhs.tableFallback') });
     walkList(block.children, depth, ctx);
     return;
   }

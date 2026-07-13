@@ -1,4 +1,5 @@
 import type { DocInfo, MediaAsset, Response } from '../../shared/types';
+import { t } from '../../shared/i18n';
 import { reportProgress } from '../progress';
 import { resolveObjToken, fetchClientVars } from '../feishu-api';
 import { downloadMedia } from '../feishu-proxy';
@@ -16,7 +17,7 @@ import {
  * 打包 zip（§5.4）。与 Markdown 图片下载共用 downloadMedia / media-util。
  */
 export async function exportAttachments(doc: DocInfo): Promise<Response> {
-  await reportProgress('attachments', 'running', '正在收集附件列表...');
+  await reportProgress('attachments', 'running', t('progress.attachments.collecting'));
 
   try {
     const resolved = await resolveObjToken(doc);
@@ -25,14 +26,14 @@ export async function exportAttachments(doc: DocInfo): Promise<Response> {
     const assets = collectAssets(data);
 
     if (assets.length === 0) {
-      await reportProgress('attachments', 'success', '该文档没有可导出的附件', 100);
+      await reportProgress('attachments', 'success', t('progress.attachments.none'), 100);
       return { success: true, data: { count: 0 } };
     }
 
     await reportProgress(
       'attachments',
       'running',
-      `正在下载 ${assets.length} 个附件...`
+      t('progress.attachments.downloading', { n: assets.length })
     );
     const results = await mapWithConcurrency(
       assets,
@@ -51,7 +52,7 @@ export async function exportAttachments(doc: DocInfo): Promise<Response> {
         reportProgress(
           'attachments',
           'running',
-          `正在下载附件 ${d}/${total}...`,
+          t('progress.attachments.downloadingOne', { done: d, total }),
           Math.round((d / total) * 95)
         )
     );
@@ -75,26 +76,26 @@ export async function exportAttachments(doc: DocInfo): Promise<Response> {
     }
 
     if (files.length === 0) {
-      const msg = '所有附件下载失败，请重试';
+      const msg = t('progress.attachments.allFailed');
       await reportProgress('attachments', 'error', msg);
       return { success: false, error: msg };
     }
 
-    await reportProgress('attachments', 'running', '正在打包 zip...', 97);
+    await reportProgress('attachments', 'running', t('progress.common.packingZip'), 97);
     const title = resolved.title || doc.title || doc.token;
     const zipUrl = await createZipDataUrl(files);
-    await downloadDataUrl(zipUrl, `${safeName(title)}-附件.zip`);
+    await downloadDataUrl(zipUrl, `${safeName(title)}-${t('progress.attachments.zipSuffix')}.zip`);
 
     await reportProgress(
       'attachments',
       'success',
-      `附件导出完成（${ok}/${assets.length}）`,
+      t('progress.attachments.done', { ok, total: assets.length }),
       100
     );
     return { success: true, data: { count: ok } };
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
-    await reportProgress('attachments', 'error', `附件导出失败：${msg}`);
+    await reportProgress('attachments', 'error', t('progress.attachments.failed', { msg }));
     return { success: false, error: msg };
   }
 }

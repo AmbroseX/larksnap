@@ -1,51 +1,62 @@
 import { useEffect, useState, useCallback, useRef } from 'react';
-import type { DocInfo, ExportProgress, RuntimeState } from '../shared/types';
+import type {
+  DocInfo,
+  ExportProgress,
+  PageKindInfo,
+  RuntimeState,
+} from '../shared/types';
 import { MSG } from '../shared/constants';
 import { sendToBackground, onBackgroundMessage } from '../shared/messaging';
 import { getConfig } from '../shared/storage';
 import { hostOf, permissionPattern } from '../shared/feishu-host';
 import { getWechatTheme } from '../shared/themes';
+import { useI18n } from '../shared/i18n/useI18n';
+import { t } from '../shared/i18n';
 import { ACTIONS, type ActionItem } from './actions';
 import { copyHtmlToClipboard } from './copy-html';
 import { XhsPreview, type XhsPreviewData } from './XhsPreview';
 
 /** 公众号样式的悬浮预览：用主题真实配色渲染一小段标题/正文/引用示例 */
 function WechatThemePreview({ themeId }: { themeId: string }) {
-  const t = getWechatTheme(themeId);
+  const theme = getWechatTheme(themeId);
   return (
     <div className="wtp">
       <div
         className="wtp-heading"
         style={{
-          color: t.headingColor,
-          ...(t.accentBar
-            ? { borderLeft: `3px solid ${t.accentBar}`, paddingLeft: 8 }
+          color: theme.headingColor,
+          ...(theme.accentBar
+            ? { borderLeft: `3px solid ${theme.accentBar}`, paddingLeft: 8 }
             : {}),
         }}
       >
-        标题示例
+        {t('sidepanel.themePreview.heading')}
       </div>
-      <p className="wtp-body">正文示例：粘贴到公众号编辑器后保持这套排版。</p>
-      <div className="wtp-quote" style={{ borderLeft: `3px solid ${t.quoteBorder}` }}>
-        引用块示例
+      <p className="wtp-body">{t('sidepanel.themePreview.body')}</p>
+      <div className="wtp-quote" style={{ borderLeft: `3px solid ${theme.quoteBorder}` }}>
+        {t('sidepanel.themePreview.quote')}
       </div>
     </div>
   );
 }
 import { CacheView } from './CacheView';
 import { WebCopyView } from './WebCopyView';
+import { TranscriptCard } from './TranscriptCard';
+import { SummaryView } from './SummaryView';
 
 type View = 'home' | 'cache' | 'xhsPreview';
 
-const IDLE_TEXT = '准备就绪，等待操作...';
-
 export function SidePanel() {
+  const { t } = useI18n();
   const [view, setView] = useState<View>('home');
-  const [status, setStatus] = useState(IDLE_TEXT);
+  /** null = 空闲态，渲染时取当前语言的「准备就绪」文案（切语言即跟随） */
+  const [status, setStatus] = useState<string | null>(null);
   const [running, setRunning] = useState<string | null>(null);
   const [percent, setPercent] = useState<number | null>(null);
   const [phase, setPhase] = useState<ExportProgress['status']>('idle');
   const [doc, setDoc] = useState<DocInfo | null>(null);
+  /** 页面三态（004）：youtube 出字幕+总结入口，generic 出总结入口，feishu 现状不动 */
+  const [pageKind, setPageKind] = useState<PageKindInfo['kind'] | null>(null);
   const [authing, setAuthing] = useState(false);
   /** 当前展开样式选择器的 action key */
   const [pickerFor, setPickerFor] = useState<string | null>(null);
@@ -59,6 +70,8 @@ export function SidePanel() {
   const refreshDoc = useCallback(async () => {
     const res = await sendToBackground<DocInfo>(MSG.GET_DOC_INFO);
     if (res.success) setDoc(res.data ?? null);
+    const kind = await sendToBackground<PageKindInfo>(MSG.GET_PAGE_KIND);
+    if (kind.success) setPageKind(kind.data?.kind ?? null);
   }, []);
 
   // 成功提示挂几秒就够了，自动回到"准备就绪"；出错的提示保留给用户看
@@ -66,7 +79,7 @@ export function SidePanel() {
     if (resetTimer.current) clearTimeout(resetTimer.current);
     resetTimer.current = setTimeout(() => {
       resetTimer.current = null;
-      setStatus(IDLE_TEXT);
+      setStatus(null);
       setPhase('idle');
       setPercent(null);
     }, 4000);
@@ -106,8 +119,21 @@ export function SidePanel() {
         }
       }
     });
+    // 切标签页 / 页内跳转（YouTube 是 SPA）→ 重新识别页面类型与文档信息
+    const onActivated = () => void refreshDoc();
+    const onUpdated = (
+      _tabId: number,
+      info: chrome.tabs.TabChangeInfo,
+      tab: chrome.tabs.Tab
+    ) => {
+      if (tab.active && (info.url || info.status === 'complete')) void refreshDoc();
+    };
+    chrome.tabs.onActivated.addListener(onActivated);
+    chrome.tabs.onUpdated.addListener(onUpdated);
     return () => {
       off();
+      chrome.tabs.onActivated.removeListener(onActivated);
+      chrome.tabs.onUpdated.removeListener(onUpdated);
       if (resetTimer.current) clearTimeout(resetTimer.current);
     };
   }, [refreshDoc, armIdleReset]);
@@ -125,9 +151,11 @@ export function SidePanel() {
       if (granted) {
         await sendToBackground(MSG.REQUEST_PERMISSION, { pattern });
         await refreshDoc();
-        setStatus(doc.isFeishuDoc ? '已授权，可开始导出' : '已授权，可通过命令行后台抓取本页');
+        setStatus(
+          doc.isFeishuDoc ? t('sidepanel.authorizedFeishu') : t('sidepanel.authorizedWeb')
+        );
       } else {
-        setStatus('未授权，无法访问该域名');
+        setStatus(t('sidepanel.notAuthorized'));
       }
     } finally {
       setAuthing(false);
@@ -140,10 +168,10 @@ export function SidePanel() {
       setRunning(item.key);
       setPhase('running');
       setPercent(null);
-      setStatus(`「${item.title}」执行中...`);
+      setStatus(t('sidepanel.runningAction', { name: t(item.title) }));
       const res = await sendToBackground(item.msg, themeId ? { themeId } : undefined);
       if (!res.success) {
-        setStatus(res.error || '操作失败');
+        setStatus(res.error || t('sidepanel.actionFailed'));
         setPhase('error');
         setRunning(null);
         return;
@@ -153,10 +181,11 @@ export function SidePanel() {
       if (item.key === 'xhs') {
         const d = res.data as { title?: string; pngs?: string[] } | undefined;
         if (d?.pngs?.length) {
+          const themeKey = item.themes?.find((th) => th.id === themeId)?.name;
           setXhsPreview({
-            title: d.title || '飞书文档',
+            title: d.title || t('sidepanel.xhsDefaultTitle'),
             pngs: d.pngs,
-            themeName: item.themes?.find((t) => t.id === themeId)?.name,
+            themeName: themeKey ? t(themeKey) : undefined,
           });
           setView('xhsPreview');
         }
@@ -170,7 +199,7 @@ export function SidePanel() {
         if (!html) return;
         try {
           await copyHtmlToClipboard(html);
-          setStatus('已复制公众号格式，去公众号编辑器粘贴即可');
+          setStatus(t('sidepanel.wechatCopied'));
           setPhase('success');
           armIdleReset();
         } catch (e) {
@@ -251,12 +280,12 @@ export function SidePanel() {
     <div className="panel">
       <header className="panel-header">
         <div className="title-row">
-          <h1>飞书文档导出助手</h1>
-          <span className="badge badge-free">限时免费</span>
+          <h1>{t('sidepanel.title')}</h1>
+          <span className="badge badge-free">{t('sidepanel.badgeFree')}</span>
           <button
             type="button"
             className="close-btn"
-            title="关闭侧边栏"
+            title={t('sidepanel.closeTitle')}
             onClick={() => window.close()}
           >
             ✕
@@ -264,24 +293,24 @@ export function SidePanel() {
         </div>
         <p className="subtitle">
           {doc?.isFeishuDoc
-            ? `${doc.docType}${doc.isPrivateDeploy ? ' · 私有化' : ''}`
-            : '网页复制 · 任意网页转 Markdown'}
+            ? `${doc.docType}${doc.isPrivateDeploy ? t('sidepanel.privateSuffix') : ''}`
+            : t('sidepanel.subtitleWeb')}
         </p>
         <div className="quota-chip">
-          <span className="quota-label">额度</span>
-          <span>限时免费开放</span>
+          <span className="quota-label">{t('sidepanel.quotaLabel')}</span>
+          <span>{t('sidepanel.quotaValue')}</span>
         </div>
       </header>
 
       {needsAuth && (
         <div className="auth-banner">
-          <p>检测到私有化飞书部署，需授权访问该域名后才能导出。</p>
+          <p>{t('sidepanel.authBannerFeishu')}</p>
           <button
             className="auth-btn"
             onClick={handleAuthorize}
             disabled={authing}
           >
-            {authing ? '授权中...' : '授权访问该域名'}
+            {authing ? t('sidepanel.authorizing') : t('sidepanel.authorize')}
           </button>
         </div>
       )}
@@ -291,14 +320,22 @@ export function SidePanel() {
         <>
           {webNeedsAuth && (
             <div className="auth-banner">
-              <p>通过命令行（larksnap-fetch）后台抓取本网页，需先授权访问该域名。</p>
+              <p>{t('sidepanel.authBannerWeb')}</p>
               <button
                 className="auth-btn"
                 onClick={handleAuthorize}
                 disabled={authing}
               >
-                {authing ? '授权中...' : '授权访问该域名'}
+                {authing ? t('sidepanel.authorizing') : t('sidepanel.authorize')}
               </button>
+            </div>
+          )}
+          {/* 004 三态入口：YouTube 视频页出字幕卡片，YouTube/普通页出 AI 总结卡片 */}
+          {pageKind === 'youtube' && <TranscriptCard />}
+          {(pageKind === 'youtube' || pageKind === 'generic') && <SummaryView />}
+          {pageKind === 'restricted' && (
+            <div className="wc-card">
+              <div className="wc-row-sub">{t('sidepanel.restrictedPage')}</div>
             </div>
           )}
           <WebCopyView />
@@ -315,8 +352,8 @@ export function SidePanel() {
                 disabled={item.disabled || !!running || needsAuth}
               >
                 <div className="action-text">
-                  <span className="action-title">{item.title}</span>
-                  <span className="action-subtitle">{item.subtitle}</span>
+                  <span className="action-title">{t(item.title)}</span>
+                  <span className="action-subtitle">{t(item.subtitle)}</span>
                 </div>
                 <span className="action-arrow">
                   {item.themes ? (pickerFor === item.key ? '⌄' : '›') : '›'}
@@ -328,18 +365,18 @@ export function SidePanel() {
                     className="theme-picker"
                     onMouseLeave={() => setHoverWechatTheme(null)}
                   >
-                    {item.themes.map((t) => (
+                    {item.themes.map((th) => (
                       <button
-                        key={t.id}
-                        className={`theme-chip${savedTheme(item) === t.id ? ' selected' : ''}`}
+                        key={th.id}
+                        className={`theme-chip${savedTheme(item) === th.id ? ' selected' : ''}`}
                         disabled={!!running}
-                        onClick={() => handleThemeClick(item, t.id)}
+                        onClick={() => handleThemeClick(item, th.id)}
                         onMouseEnter={() =>
-                          item.key === 'wechat' && setHoverWechatTheme(t.id)
+                          item.key === 'wechat' && setHoverWechatTheme(th.id)
                         }
                       >
-                        <span className="theme-swatch" style={{ background: t.swatch }} />
-                        {t.name}
+                        <span className="theme-swatch" style={{ background: th.swatch }} />
+                        {t(th.name)}
                       </button>
                     ))}
                   </div>
@@ -363,7 +400,7 @@ export function SidePanel() {
           </div>
         )}
         <div className={`status-text status-${phase}`}>
-          <span className="status-msg">{status}</span>
+          <span className="status-msg">{status ?? t('sidepanel.idle')}</span>
           {phase === 'running' && percent != null && (
             <span className="status-pct">{percent}%</span>
           )}

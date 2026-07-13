@@ -33,12 +33,19 @@ body {
 }
 
 .field input[type='text'],
-.field select {
+.field select,
+.field textarea {
   padding: 8px 10px;
   border: 1px solid #dfe3e8;
   border-radius: 6px;
   font-size: 13px;
   font-family: inherit;
+}
+
+/* 不代理地址列表：主机名逐行对齐，等宽更好读 */
+.field textarea {
+  font-family: Consolas, Monaco, monospace;
+  resize: vertical;
 }
 
 .field.checkbox label {

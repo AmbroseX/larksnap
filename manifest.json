@@ -1,8 +1,9 @@
 {
   "manifest_version": 3,
-  "name": "LarkSnap · 飞书文档导出助手",
-  "version": "0.4.0",
-  "description": "在飞书文档页面一键导出为 Markdown / PDF / HTML，批量下载附件，支持离线缓存；任意网页一键转 Markdown、解除复制限制、选中自动复制。",
+  "name": "__MSG_appName__",
+  "version": "0.4.1",
+  "description": "__MSG_appDesc__",
+  "default_locale": "zh_CN",
   "permissions": [
     "cookies",
     "tabs",
@@ -34,7 +35,7 @@
     "type": "module"
   },
   "action": {
-    "default_title": "LarkSnap · 飞书文档导出助手",
+    "default_title": "__MSG_appName__",
     "default_popup": "popup.html",
     "default_icon": {
       "16": "icons/icon-16.png",

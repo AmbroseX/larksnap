@@ -5,25 +5,28 @@
  * 两边靠 id 对上，避免侧边栏包进渲染器代码。
  */
 
+import type { TranslationKey } from './i18n';
+
 export interface ThemeOption {
   id: string;
-  name: string;
+  /** 主题名（i18n 字典 key，渲染时经 t() 取文案） */
+  name: TranslationKey;
   /** 选择器里的色块颜色 */
   swatch: string;
 }
 
 /** 小红书卡片主题 */
 export const XHS_THEME_OPTIONS: ThemeOption[] = [
-  { id: 'white', name: '简约白', swatch: '#ffffff' },
-  { id: 'warm', name: '暖米黄', swatch: '#faf5e9' },
-  { id: 'dark', name: '夜间黑', swatch: '#191b1f' },
+  { id: 'white', name: 'themes.xhs.white', swatch: '#ffffff' },
+  { id: 'warm', name: 'themes.xhs.warm', swatch: '#faf5e9' },
+  { id: 'dark', name: 'themes.xhs.dark', swatch: '#191b1f' },
 ];
 
 /** 公众号排版主题 */
 export const WECHAT_THEME_OPTIONS: ThemeOption[] = [
-  { id: 'classic', name: '经典黑', swatch: '#1f2329' },
-  { id: 'blue', name: '商务蓝', swatch: '#3370ff' },
-  { id: 'green', name: '微信绿', swatch: '#07c160' },
+  { id: 'classic', name: 'themes.wechat.classic', swatch: '#1f2329' },
+  { id: 'blue', name: 'themes.wechat.blue', swatch: '#3370ff' },
+  { id: 'green', name: 'themes.wechat.green', swatch: '#07c160' },
 ];
 
 /**

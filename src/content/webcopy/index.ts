@@ -1,4 +1,5 @@
 import { CONTENT_MSG, STORAGE_KEYS } from '../../shared/constants';
+import { ensureI18n, t } from '../../shared/i18n';
 import { getConfig } from '../../shared/storage';
 import type { WebCopyState } from '../../shared/types';
 import { pageToMarkdown, selectionToMarkdown } from './html2md';
@@ -27,6 +28,8 @@ if (!window.__larksnap_webcopy) {
 }
 
 function mount(): void {
+  // 语言尽早就绪（幂等）；toast 前 handle() 还会再 await 一次兜底
+  void ensureI18n();
   // 挂载即按当前配置决定是否启动自动复制；配置改动热更新，无需刷新页面
   getConfig().then((cfg) => applyAutoCopyConfig(cfg.webcopy));
   chrome.storage.onChanged.addListener((changes, area) => {
@@ -57,15 +60,22 @@ function mount(): void {
 }
 
 async function handle(msg: { type: string; data?: unknown }): Promise<unknown> {
+  await ensureI18n();
   switch (msg.type) {
     case CONTENT_MSG.WEBCOPY_PAGE_TO_MD: {
       const { writeClipboard: doWrite } = (msg.data || {}) as {
         writeClipboard?: boolean;
       };
-      const result = pageToMarkdown();
+      const cfg = await getConfig();
+      const result = pageToMarkdown({
+        frontmatter: cfg.webcopy.frontmatter,
+        imageMode: cfg.webcopy.pageImageMode,
+      });
       if (doWrite) {
         await writeClipboard(result.markdown);
-        showToast('整页 Markdown 已复制');
+        showToast(
+          result.degraded ? t('toast.pageCopiedDegraded') : t('toast.pageCopied')
+        );
       }
       return { success: true, data: result };
     }
@@ -77,7 +87,7 @@ async function handle(msg: { type: string; data?: unknown }): Promise<unknown> {
       const result = selectionToMarkdown();
       if (doWrite) {
         await writeClipboard(result.markdown);
-        showToast('选中内容已复制为 Markdown');
+        showToast(t('toast.selectionCopied'));
       }
       return { success: true, data: result };
     }
@@ -87,7 +97,7 @@ async function handle(msg: { type: string; data?: unknown }): Promise<unknown> {
       const next = enabled ?? !isUnlocked();
       if (next) startUnlock();
       else stopUnlock();
-      showToast(next ? '已解除复制限制' : '已恢复页面原状');
+      showToast(next ? t('webcopy.unlock.on') : t('webcopy.unlock.off'));
       return { success: true, data: { enabled: next } };
     }
 
@@ -97,6 +107,6 @@ async function handle(msg: { type: string; data?: unknown }): Promise<unknown> {
     }
 
     default:
-      return { success: false, error: `未知 webcopy 消息: ${msg.type}` };
+      return { success: false, error: t('bg.unknownWebcopyMessage', { type: msg.type }) };
   }
 }

@@ -1,4 +1,5 @@
 import type { DocInfo, ExtensionConfig, MediaAsset, Response } from '../../shared/types';
+import { t } from '../../shared/i18n';
 import { getConfig } from '../../shared/storage';
 import { reportProgress } from '../progress';
 import { resolveObjToken, fetchClientVars } from '../feishu-api';
@@ -72,7 +73,7 @@ export async function exportMarkdown(doc: DocInfo): Promise<Response> {
 // ==================== P-official ====================
 
 async function runOfficialMd(doc: DocInfo): Promise<Response> {
-  await reportProgress('markdown', 'running', '正在创建官方 Markdown 导出任务...', 20);
+  await reportProgress('markdown', 'running', t('progress.markdown.officialTask'), 20);
   const resolved = await resolveObjToken(doc);
   const result = await runExportTask(
     resolved.objToken,
@@ -81,13 +82,13 @@ async function runOfficialMd(doc: DocInfo): Promise<Response> {
     resolved.objToken
   );
   const title = resolved.title || doc.title || doc.token;
-  await reportProgress('markdown', 'running', '正在下载 Markdown...', 85);
+  await reportProgress('markdown', 'running', t('progress.markdown.downloading'), 85);
   await downloadBase64(
     result.base64,
     result.mimeType || 'text/markdown',
     `${safeName(title)}.md`
   );
-  await reportProgress('markdown', 'success', 'Markdown 导出完成（官方）', 100);
+  await reportProgress('markdown', 'success', t('progress.markdown.doneOfficial'), 100);
   return { success: true };
 }
 
@@ -103,15 +104,15 @@ async function runDecodeMd(
       await reportProgress(
         'markdown',
         'running',
-        '该文档官方导出已关闭，将通过页面数据导出（请确保你已获授权）'
+        t('progress.markdown.officialClosed')
       );
     }
     const resolved = await resolveObjToken(doc);
-    await reportProgress('markdown', 'running', '正在拉取文档块内容...');
+    await reportProgress('markdown', 'running', t('progress.markdown.fetchingBlocks'));
     const cv = await fetchClientVars(resolved);
     const data = (cv.data ?? {}) as Record<string, unknown>;
 
-    await reportProgress('markdown', 'running', '正在转换为 Markdown...');
+    await reportProgress('markdown', 'running', t('progress.markdown.converting'));
     const { markdown, images, sheetBlocks } = blocksToMarkdown(
       data,
       resolved.objToken
@@ -126,7 +127,7 @@ async function runDecodeMd(
       await reportProgress(
         'markdown',
         'running',
-        `正在读取 ${sheetBlocks.length} 个内嵌表格...`
+        t('progress.markdown.readingSheets', { n: sheetBlocks.length })
       );
       let grids: Record<string, string[][] | null> = {};
       try {
@@ -139,8 +140,8 @@ async function runDecodeMd(
         const rows = grids[ref.blockId];
         const repl = rows
           ? sheetToMdTable(rows)
-          : `[查看内嵌表格](https://${doc.host}/sheets/${ref.shtToken}?sheet=${ref.subId})` +
-            '\n<!-- 内嵌表格未能读取，已降级为链接 -->';
+          : `[${t('progress.markdown.viewEmbeddedSheet')}](https://${doc.host}/sheets/${ref.shtToken}?sheet=${ref.subId})` +
+            '\n<!-- ' + t('progress.markdown.sheetFallback') + ' -->';
         finalMd = replaceAll(finalMd, `feishu-sheet-block://${ref.blockId}`, repl);
       }
     }
@@ -156,7 +157,7 @@ async function runDecodeMd(
       );
     } else {
       // download 模式：并发下载图片（≤3 + 退避），替换为相对路径，打包 zip
-      await reportProgress('markdown', 'running', `正在下载 ${images.length} 张图片...`);
+      await reportProgress('markdown', 'running', t('progress.common.downloadingImages', { n: images.length }));
       const assets = await mapWithConcurrency(
         images,
         3,
@@ -174,7 +175,7 @@ async function runDecodeMd(
           reportProgress(
             'markdown',
             'running',
-            `正在下载图片 ${d}/${total}...`,
+            t('progress.common.downloadingImage', { done: d, total }),
             Math.round((d / total) * 95)
           )
       );
@@ -199,28 +200,28 @@ async function runDecodeMd(
         }
       }
       files.unshift({ path: `${safeName(title)}.md`, content: finalMd });
-      await reportProgress('markdown', 'running', '正在打包 zip...', 97);
+      await reportProgress('markdown', 'running', t('progress.common.packingZip'), 97);
       const zipUrl = await createZipDataUrl(files);
       await downloadDataUrl(zipUrl, `${safeName(title)}.zip`);
 
       if (ok < images.length) {
         const msg =
           ok === 0
-            ? `已导出，但 ${images.length} 张图片全部下载失败（多为未授权该域名/图片域，请重新授权后重试），已降级为在线链接`
-            : `Markdown 导出完成（图片 ${ok}/${images.length}，部分失败已降级为在线链接）`;
+            ? t('progress.markdown.allImagesFailed', { n: images.length })
+            : t('progress.markdown.doneWithPartialImages', { ok, total: images.length });
         await reportProgress('markdown', ok === 0 ? 'error' : 'success', msg, 100);
         return { success: ok > 0, error: ok === 0 ? msg : undefined };
       }
       await reportProgress(
         'markdown',
         'success',
-        `Markdown 导出完成（含 ${ok} 张图片）`,
+        t('progress.markdown.doneWithImages', { ok }),
         100
       );
       return { success: true };
     }
 
-    await reportProgress('markdown', 'success', 'Markdown 导出完成', 100);
+    await reportProgress('markdown', 'success', t('progress.markdown.done'), 100);
     return { success: true };
   } catch (err) {
     return fail('markdown', errMsg(err));
