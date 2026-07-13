@@ -8,12 +8,13 @@ import type {
 import { getConfig } from '../../shared/storage';
 import { t } from '../../shared/i18n';
 import { reportProgress } from '../progress';
-import { getActiveTab } from '../doc-detect';
-import { isRestrictedUrl, webcopyPageMd } from '../webcopy';
-import { fetchTranscriptFromTab, isYoutubeWatchUrl } from '../exporters/transcript';
+import { isRestrictedUrl, isYoutubeWatchUrl } from '../../shared/page-kind';
+import { webcopyPageMd } from '../webcopy';
+import { fetchTranscriptFromTab } from '../exporters/transcript';
 import { splitText } from './splitter';
-import { chatComplete } from './llm';
+import { chatComplete, LlmError } from './llm';
 import { buildRefineMessages, buildSummaryMessages } from './prompts';
+import { estimateTokens, PROMPT_RESERVE, refineChunkChars, TOKEN_BUDGET } from './tokens';
 
 /**
  * AI 总结编排（US2/US3，FR-003/004/007/008）：
@@ -25,8 +26,8 @@ import { buildRefineMessages, buildSummaryMessages } from './prompts';
 /** SUMMARIZE_PAGE 可能的三种响应数据 */
 export type SummarizeData = SummaryResult | SummaryNeedsAck | WebCopyNeedsPermission;
 
-/** 取材结果：来源枚举只用于统计与提示，不含 URL */
-interface SourceMaterial {
+/** 取材结果：来源枚举只用于统计与提示，不含 URL（007 起被 chat-port 复用） */
+export interface SourceMaterial {
   kind: 'youtube' | 'page';
   title: string;
   text: string;
@@ -34,7 +35,13 @@ interface SourceMaterial {
   note?: string;
 }
 
-export async function summarizePage(): Promise<Response<SummarizeData>> {
+/** 总结目标页：由调用方在触发瞬间捕获（006：禁止在此重查活动页） */
+export interface SummarizeTarget {
+  tabId: number;
+  url: string;
+}
+
+export async function summarizePage(target: SummarizeTarget): Promise<Response<SummarizeData>> {
   const config = await getConfig();
   const ai = config.ai;
 
@@ -60,7 +67,7 @@ export async function summarizePage(): Promise<Response<SummarizeData>> {
   await reportProgress('summarize', 'running', t('progress.summarize.extracting'));
   try {
     // ③ 取材：YouTube 页走字幕（降级用标题+简介）；普通页复用 webcopy 管线（FR-008）
-    const source = await collectSource(ai.targetLang);
+    const source = await collectSource(ai.targetLang, target);
     if ('needsPermission' in source) {
       await reportProgress('summarize', 'error', t('bg.noPermission'));
       return {
@@ -73,12 +80,16 @@ export async function summarizePage(): Promise<Response<SummarizeData>> {
     const text = source.text.trim();
     if (!text) throw new Error(t('bg.nothingToSummarize'));
 
-    // ④ 短内容单次直调，长内容切块后逐块 refine（FR-007）
-    const chunks = splitText(text, { chunkSize: 1000, overlap: 100 });
+    // ④ token 预算内整篇直塞；超预算才切块 refine（007，评审阻断项 1）
+    const budget = TOKEN_BUDGET - PROMPT_RESERVE;
+    let chunks =
+      estimateTokens(text) <= budget
+        ? [text]
+        : splitText(text, { chunkSize: refineChunkChars(), overlap: 500 });
     let summary = '';
     let doneChunks = 0;
-    try {
-      for (let i = 0; i < chunks.length; i++) {
+    const runChunks = async () => {
+      for (let i = doneChunks; i < chunks.length; i++) {
         await reportProgress(
           'summarize',
           'running',
@@ -93,6 +104,21 @@ export async function summarizePage(): Promise<Response<SummarizeData>> {
                 buildRefineMessages(summary, chunks[i], ai.targetLang)
               );
         doneChunks = i + 1;
+      }
+    };
+    try {
+      try {
+        await runChunks();
+      } catch (err) {
+        // 估算偏低被端点判溢出 → 自动降级切块重试一次，不直接报死
+        if (err instanceof LlmError && err.kind === 'overflow' && chunks.length === 1) {
+          chunks = splitText(text, { chunkSize: refineChunkChars(), overlap: 500 });
+          summary = '';
+          doneChunks = 0;
+          await runChunks();
+        } else {
+          throw err;
+        }
       }
     } catch (err) {
       // ⑤ 中途失败保留前面块的中间总结，标注不完整，不整体丢弃（宪法 III）
@@ -137,18 +163,18 @@ export async function summarizePage(): Promise<Response<SummarizeData>> {
   }
 }
 
-/** 取材：按页面类型选路。返回 needsPermission 时由侧边栏手势授权后重试 */
-async function collectSource(
-  targetLang: string
+/** 取材：按页面类型选路。返回 needsPermission 时由侧边栏手势授权后重试（007 起被 chat-port 复用） */
+export async function collectSource(
+  targetLang: string,
+  target: SummarizeTarget
 ): Promise<SourceMaterial | WebCopyNeedsPermission> {
-  const tab = await getActiveTab();
-  if (!tab?.id || !tab.url) throw new Error(t('bg.noActiveTab'));
-  if (isRestrictedUrl(tab.url)) {
+  const { tabId, url } = target;
+  if (isRestrictedUrl(url)) {
     throw new Error(t('bg.summaryRestricted'));
   }
 
-  if (isYoutubeWatchUrl(tab.url)) {
-    const tr = await fetchTranscriptFromTab(tab.id, targetLang);
+  if (isYoutubeWatchUrl(url)) {
+    const tr = await fetchTranscriptFromTab(tabId, targetLang);
     if (tr.degraded) {
       return {
         kind: 'youtube',
@@ -161,7 +187,7 @@ async function collectSource(
   }
 
   // 普通网页：复用现有 webcopy 提取管线（Readability + 兜底），零新提取代码
-  const res = await webcopyPageMd();
+  const res = await webcopyPageMd(tabId, url);
   const fallback = res.data as WebCopyNeedsPermission | undefined;
   if (!res.success) {
     if (fallback?.needsPermission) return fallback;

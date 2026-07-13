@@ -15,19 +15,39 @@ function systemPrompt(targetLang: string): ChatMessage {
   };
 }
 
+/** 总结指令（首块 / 直塞 / 对话首轮共用同一份，保证产物形态一致） */
+const SUMMARY_INSTRUCTION =
+  'Summarize the following CONTENT into brief sentences of key points, ' +
+  'then provide complete highlighted information in a list, ' +
+  'choosing an appropriate emoji for each highlight.\n\n';
+
 /** 首块 / 短内容：直接总结（简述 + emoji 要点列表） */
 export function buildSummaryMessages(content: string, targetLang: string): ChatMessage[] {
   return [
     systemPrompt(targetLang),
-    {
-      role: 'user',
-      content:
-        'Summarize the following CONTENT into brief sentences of key points, ' +
-        'then provide complete highlighted information in a list, ' +
-        'choosing an appropriate emoji for each highlight.\n\n' +
-        `CONTENT:\n${content}`,
-    },
+    { role: 'user', content: `${SUMMARY_INSTRUCTION}CONTENT:\n${content}` },
   ];
+}
+
+/**
+ * 对话页 system（007）：兼顾首轮总结与后续追问——
+ * 追问必须基于给定内容与上文回答，内容里没有的就明说，不编造。
+ */
+export function chatSystemPrompt(targetLang: string): ChatMessage {
+  return {
+    role: 'system',
+    content:
+      'You are a helpful assistant that summarizes web articles and video transcripts, ' +
+      'and answers follow-up questions about them. ' +
+      'Base your answers strictly on the provided content and the earlier conversation; ' +
+      'if the content does not contain the answer, say so instead of guessing. ' +
+      `Always reply in ${targetLang} using Markdown.`,
+  };
+}
+
+/** 会话里存的是裸全文（kind='source'），发送前包上总结指令 */
+export function wrapSourceContent(content: string): string {
+  return `${SUMMARY_INSTRUCTION}CONTENT:\n${content}`;
 }
 
 /** 后续块：refine 累进精炼——拿「已有总结 + 新块」更新总结，不是简单 map-reduce */
