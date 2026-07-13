@@ -1,47 +1,68 @@
-import { Readability } from '@mozilla/readability';
 import TurndownService from 'turndown';
-import { gfm } from 'turndown-plugin-gfm';
+import {
+  highlightedCodeBlock,
+  strikethrough,
+  taskListItems,
+} from 'turndown-plugin-gfm';
 import type { WebCopyMdResult } from '../../shared/types';
+import { extractArticle } from './extract';
+import { buildFrontmatter } from './frontmatter';
+import { addTableRule } from './rules/table';
+import { addCodeRule } from './rules/code';
+import { addMathRule } from './rules/math';
+import { addImageRule, type PageImageMode } from './rules/image';
 
 /**
- * HTML → Markdown 转换管线（技术方案 §3）：
- *   整页：Readability 提取正文（失败降级全 body）→ Turndown
+ * HTML → Markdown 转换管线（002.1 升级版）：
+ *   整页：Defuddle 提取正文（兜底选择器链 / 非 HTML 短路）→ Turndown 精配置
  *   选区：cloneContents 序列化 → Turndown
- * 链接/图片统一补全为绝对 URL；图片保留外链不下载（P0）。
+ * 表格/代码/公式/图片走 rules/ 四条自定义规则；链接统一补全绝对 URL。
  */
 
-let turndown: TurndownService | null = null;
+export interface PageMdOptions {
+  /** 开头输出 YAML frontmatter；关闭则用简单标题头 */
+  frontmatter?: boolean;
+  /** 图片模式：外链（默认）/ base64 内联 */
+  imageMode?: PageImageMode;
+}
 
-function getTurndown(): TurndownService {
-  if (turndown) return turndown;
+/** Turndown 精配置（MarkDownload / Obsidian Clipper / MarkSnip 共同验证过的组合） */
+function createService(imageMode: PageImageMode, mini: boolean): TurndownService {
   const td = new TurndownService({
     headingStyle: 'atx',
-    codeBlockStyle: 'fenced',
+    hr: '---',
     bulletListMarker: '-',
+    codeBlockStyle: 'fenced',
+    fence: '```',
+    emDelimiter: '*',
+    strongDelimiter: '**',
+    linkStyle: 'inlined',
+    preformattedCode: true,
   });
-  gfm(td);
+  td.use([highlightedCodeBlock, strikethrough, taskListItems]);
+  // 结构性内嵌标签原样保留（iframe 嵌入、上下标等 MD 表达不了的）
+  td.keep(['iframe', 'sub', 'sup', 'u', 'ins', 'small', 'big'] as unknown as (keyof HTMLElementTagNameMap)[]);
+  // 关掉过度转义：默认会把正文里的 snake_case 转成 snake\_case，得不偿失
+  (td as unknown as { escape: (s: string) => string }).escape = (s) => s;
 
-  // 交互元素直接丢弃
+  // 删除线统一双波浪线（gfm 插件默认单波浪线，部分渲染器不认）
+  td.addRule('strikethrough-double', {
+    filter: ['del', 's'],
+    replacement: (content) => `~~${content}~~`,
+  });
+
+  // 交互元素直接丢弃（iframe 走 keep 保留嵌入源）；
+  // 例外：列表项里的 checkbox 留给 taskListItems 插件转 [x]/[ ]
   td.remove(['script', 'style', 'noscript']);
   td.addRule('drop-interactive', {
-    filter: ['iframe', 'form', 'button', 'input', 'select', 'textarea'],
-    replacement: () => '',
-  });
-
-  // 图片：优先 data-src（微信公众号等懒加载），补全绝对 URL
-  td.addRule('image-absolute', {
-    filter: 'img',
-    replacement: (_content, node) => {
-      const img = node as HTMLElement;
-      const src =
-        img.getAttribute('data-src') ||
-        img.getAttribute('data-original') ||
-        img.getAttribute('src') ||
-        '';
-      if (!src || src.startsWith('data:')) return '';
-      const alt = (img.getAttribute('alt') || '').replace(/[\[\]\n]/g, ' ');
-      return `![${alt}](${toAbsolute(src)})`;
+    filter: (node) => {
+      const name = node.nodeName;
+      if (name === 'FORM' || name === 'BUTTON' || name === 'SELECT' || name === 'TEXTAREA') return true;
+      if (name !== 'INPUT') return false;
+      const input = node as HTMLInputElement;
+      return !(input.type === 'checkbox' && node.parentNode?.nodeName === 'LI');
     },
+    replacement: () => '',
   });
 
   // 链接补全绝对 URL；无有效 href 的退化为纯文本
@@ -56,65 +77,57 @@ function getTurndown(): TurndownService {
     },
   });
 
-  // <pre> 统一提纯为 fenced 代码块：兼容 CSDN/掘金那类
-  // 高亮行号表格嵌套结构，直接取代码文本，不让表格规则搅进来
-  td.addRule('pre-purify', {
-    filter: 'pre',
-    replacement: (_content, node) => {
-      const pre = node as HTMLElement;
-      const code = pre.querySelector('code');
-      const text = (code ?? pre).textContent ?? '';
-      const lang = detectLang(pre, code);
-      const trimmed = text.replace(/\n+$/, '');
-      return `\n\n\`\`\`${lang}\n${trimmed}\n\`\`\`\n\n`;
-    },
-  });
-
-  turndown = td;
+  addCodeRule(td);
+  addMathRule(td);
+  addImageRule(td, imageMode);
+  // mini 实例给表格单元格递归用，自己不再挂表格规则（嵌套表格按普通内容展开）
+  if (!mini) {
+    addTableRule(td, () => getService(imageMode, true));
+  }
   return td;
 }
 
-/** 从 class（language-xxx / lang-xxx）里猜代码语言 */
-function detectLang(pre: HTMLElement, code: HTMLElement | null): string {
-  const cls = `${pre.className} ${code?.className ?? ''}`;
-  const m = cls.match(/(?:language|lang)-([\w+#-]+)/i);
-  return m ? m[1].toLowerCase() : '';
+const services = new Map<string, TurndownService>();
+
+function getService(imageMode: PageImageMode, mini = false): TurndownService {
+  const key = `${imageMode}:${mini}`;
+  let td = services.get(key);
+  if (!td) {
+    td = createService(imageMode, mini);
+    services.set(key, td);
+  }
+  return td;
 }
 
 function toAbsolute(url: string): string {
   try {
-    return new URL(url, location.href).href;
+    return new URL(url, document.baseURI).href;
   } catch {
     return url;
   }
 }
 
-/** 整页转 Markdown：Readability 提正文，失败降级全 body */
-export function pageToMarkdown(): WebCopyMdResult {
-  // Readability 会改 DOM，必须克隆
-  const clone = document.cloneNode(true) as Document;
-  let html = '';
-  let title = document.title;
-  try {
-    const article = new Readability(clone).parse();
-    if (article?.content) {
-      html = article.content;
-      title = article.title || title;
-    }
-  } catch {
-    // SPA / 结构怪异页：走降级
-  }
-  if (!html) {
-    const body = document.body.cloneNode(true) as HTMLElement;
-    body
-      .querySelectorAll('script,style,noscript,iframe')
-      .forEach((el) => el.remove());
-    html = body.innerHTML;
-  }
+/** 整页转 Markdown：Defuddle 提正文（含兜底），可选 frontmatter */
+export function pageToMarkdown(opts: PageMdOptions = {}): WebCopyMdResult {
+  const { frontmatter = true, imageMode = 'link' } = opts;
+  const article = extractArticle();
+  const title = article.meta.title || document.title;
 
-  const md = getTurndown().turndown(html);
-  const header = `# ${title}\n\n> 来源：${location.href}　·　抓取时间：${new Date().toISOString()}\n\n`;
-  return { markdown: header + md, title };
+  const body =
+    article.source === 'raw-text' || article.source === 'pre'
+      ? (article.text ?? '')
+      : getService(imageMode).turndown(article.contentHtml);
+
+  const head = frontmatter
+    ? `${buildFrontmatter(article.meta, location.href)}# ${title}\n\n`
+    : `# ${title}\n\n> 来源：${location.href}　·　抓取时间：${new Date().toISOString()}\n\n`;
+
+  return {
+    markdown: head + body,
+    title,
+    source: article.source,
+    degraded: article.degraded,
+  };
 }
 
 /** 选区转 Markdown：支持多段选区，无选区时报错 */
@@ -127,7 +140,7 @@ export function selectionToMarkdown(): WebCopyMdResult {
   for (let i = 0; i < sel.rangeCount; i++) {
     holder.appendChild(sel.getRangeAt(i).cloneContents());
   }
-  const markdown = getTurndown().turndown(holder.innerHTML);
+  const markdown = getService('link').turndown(holder.innerHTML);
   return { markdown, title: document.title };
 }
 
