@@ -109,7 +109,7 @@ function renderList(
       if (!block) return '';
       ctx.seen.add(id);
       const children = renderIds(block.children, depth + 1, ctx);
-      return `<li style="${BODY};margin:4px 0">${inlineToWechatHtml(block.text)}${children}</li>`;
+      return `<li${mark(listType, block.id)} data-larksnap-content="" style="${BODY};margin:4px 0">${inlineToWechatHtml(block.text)}${children}</li>`;
     })
     .join('');
   return `<${tag} type="${typeAttr}" style="margin:10px 0;padding-left:24px">${items}</${tag}>`;
@@ -129,7 +129,7 @@ function renderBlock(id: string, depth: number, ctx: Ctx): string {
     case type === 'text': {
       const inline = inlineToWechatHtml(block.text);
       if (!inline.trim()) return '';
-      return `<section style="${BODY};margin:10px 0">${inline}</section>`;
+      return `<section${mark('text', block.id)} data-larksnap-content="" style="${BODY};margin:10px 0">${inline}</section>`;
     }
 
     case type.startsWith('heading'): {
@@ -141,15 +141,15 @@ function renderBlock(id: string, depth: number, ctx: Ctx): string {
           ? `border-left:4px solid ${ctx.theme.accentBar};padding-left:10px;`
           : '';
       return (
-        `<h${level} style="font-size:${sizes[level - 1]}px;font-weight:bold;` +
+        `<h${level}${mark(type, block.id)} data-larksnap-content="" style="font-size:${sizes[level - 1]}px;font-weight:bold;` +
         `line-height:1.4;color:${ctx.theme.headingColor};${bar}margin:15px 0">` +
         `${inlineToWechatHtml(block.text)}</h${level}>`
       );
     }
 
     case type === 'todo': {
-      const mark = block.extra.done ? '☑' : '☐';
-      return `<section style="${BODY};margin:10px 0">${mark} ${inlineToWechatHtml(block.text)}</section>`;
+      const box = block.extra.done ? '☑' : '☐';
+      return `<section${mark('todo', block.id)} data-larksnap-content="" style="${BODY};margin:10px 0">${box} ${inlineToWechatHtml(block.text)}</section>`;
     }
 
     case type === 'quote' || type === 'quote_container':
@@ -162,7 +162,7 @@ function renderBlock(id: string, depth: number, ctx: Ctx): string {
       return renderCode(block, 'latex');
 
     case type === 'divider':
-      return '<hr style="border:none;border-top:1px solid #e5e5e5;margin:20px 0">';
+      return `<hr${mark('divider', block.id)} style="border:none;border-top:1px solid #e5e5e5;margin:20px 0">`;
 
     case type === 'image':
       return renderImage(block, ctx);
@@ -199,6 +199,15 @@ function renderBlock(id: string, depth: number, ctx: Ctx): string {
 
 // ==================== 具体块渲染 ====================
 
+/**
+ * 块级三属性（FR-010，壹伴 data-mpa-md-* 同构）：key=块类型、action-id=块唯一 id。
+ * 正文容器另打 data-larksnap-content。粘贴路线编辑器留不留这些属性都不影响样式；
+ * JSAPI 灌入后可回查 DOM，为后续"换肤重排已灌入内容"留口。
+ */
+function mark(type: string, blockId: string): string {
+  return ` data-larksnap-key="${escapeHtml(type)}" data-larksnap-action-id="${escapeHtml(blockId)}"`;
+}
+
 function placeholder(text: string): string {
   return (
     '<section style="margin:10px 0;padding:6px 10px;background:#f2f3f5;' +
@@ -214,7 +223,7 @@ function renderQuote(block: Block, depth: number, ctx: Ctx): string {
     ? `<section style="${BODY};margin:6px 0">${self}</section>` + children
     : children;
   return (
-    `<blockquote style="margin:10px 0;padding:6px 12px;border-left:4px solid ${ctx.theme.quoteBorder};` +
+    `<blockquote${mark('quote', block.id)} data-larksnap-content="" style="margin:10px 0;padding:6px 12px;border-left:4px solid ${ctx.theme.quoteBorder};` +
     `background:#f9f9f9;color:rgba(0,0,0,0.6)">${inner}</blockquote>`
   );
 }
@@ -222,6 +231,8 @@ function renderQuote(block: Block, depth: number, ctx: Ctx): string {
 /**
  * 代码块：pre 挂 code-snippet 三个 class（公众号编辑器自己认的类，
  * 粘贴后保留代码块外观），每行一个 display:block 的 code（crx 规则）。
+ * 微信新版编辑器 schema（plan §5.6）：外层包 <section class="code-snippet__js">，
+ * 每行内容再包 <span leaf="">——没有叶节点标记，set_content 后代码块会退化成普通段落。
  */
 function renderCode(block: Block, langOverride?: string): string {
   const lang = langOverride ?? String(block.extra.language || '');
@@ -229,13 +240,17 @@ function renderCode(block: Block, langOverride?: string): string {
     .split('\n')
     .map((line) => {
       const t = escapeHtml(line);
-      return `<code style="display:block;font-family:${MONO};white-space:pre-wrap;word-break:break-all">${t || '<br>'}</code>`;
+      return (
+        `<code style="display:block;font-family:${MONO};white-space:pre-wrap;word-break:break-all">` +
+        `<span leaf="">${t || '<br>'}</span></code>`
+      );
     })
     .join('');
   return (
-    `<pre class="code-snippet__js code-snippet code-snippet_nowrap" data-lang="${escapeHtml(lang)}" ` +
-    'style="margin:10px 0;padding:12px 14px;background:#f5f6f7;border-radius:6px;' +
-    `font-size:13px;line-height:1.6;overflow-x:auto">${lines}</pre>`
+    `<section class="code-snippet__js"${mark(langOverride ? 'equation' : 'code', block.id)} style="margin:10px 0">` +
+    `<pre class="code-snippet__js code-snippet code-snippet_nowrap" data-lang="${escapeHtml(lang)}" data-larksnap-content="" ` +
+    'style="margin:0;padding:12px 14px;background:#f5f6f7;border-radius:6px;' +
+    `font-size:13px;line-height:1.6;overflow-x:auto">${lines}</pre></section>`
   );
 }
 
@@ -250,8 +265,8 @@ function renderImage(block: Block, ctx: Ctx): string {
   if (!url) return placeholder('图片下载失败，请在飞书另存后手动插入');
   const align = Number(img.align) === 1 ? 'left' : Number(img.align) === 3 ? 'right' : 'center';
   return (
-    `<section style="text-align:${align};margin:20px 0">` +
-    `<img src="${url}" style="max-width:100%;border-radius:8px" data-width="100%">` +
+    `<section${mark('image', block.id)} style="text-align:${align};margin:20px 0">` +
+    `<img src="${url}" data-larksnap-content="" style="max-width:100%;border-radius:8px" data-width="100%">` +
     '</section>'
   );
 }
@@ -268,10 +283,10 @@ function renderCallout(block: Block, depth: number, ctx: Ctx): string {
     ? `<section style="flex:none;margin-right:8px;font-size:16px;line-height:1.8">${emoji}</section>`
     : '';
   return (
-    `<section style="display:flex;background:${bg};border:1px solid rgba(0,0,0,0.06);` +
+    `<section${mark('callout', block.id)} style="display:flex;background:${bg};border:1px solid rgba(0,0,0,0.06);` +
     'border-radius:8px;padding:10px 14px;margin:10px 0">' +
     emojiPart +
-    `<section style="flex:1;min-width:0">${inner}</section></section>`
+    `<section data-larksnap-content="" style="flex:1;min-width:0">${inner}</section></section>`
   );
 }
 
@@ -317,7 +332,7 @@ function renderGrid(block: Block, depth: number, ctx: Ctx): string {
       return `<section style="flex:${flex};min-width:0">${renderIds(col.children, depth, ctx)}</section>`;
     })
     .join('');
-  return `<section style="display:flex;gap:12px;margin:10px 0">${cols}</section>`;
+  return `<section${mark('grid', block.id)} style="display:flex;gap:12px;margin:10px 0">${cols}</section>`;
 }
 
 /**
@@ -383,8 +398,8 @@ function renderTable(block: Block, depth: number, ctx: Ctx): string {
   }
 
   return (
-    '<section style="margin:10px 0;overflow-x:auto">' +
-    '<table style="border-collapse:collapse;width:100%">' +
+    `<section${mark('table', block.id)} style="margin:10px 0;overflow-x:auto">` +
+    '<table data-larksnap-content="" style="border-collapse:collapse;width:100%">' +
     `<tbody>${trs.join('')}</tbody></table></section>`
   );
 }
