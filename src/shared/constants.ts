@@ -13,6 +13,8 @@ export const STORAGE_KEYS = {
   CACHE_DOC_PREFIX: 'larksnap:cache:doc:',
   /** Markdown 导出能力缓存（按 host）：Record<host, MarkdownCapability> */
   MD_CAP: 'larksnap:md-capability',
+  /** 视频下载线路记忆（按站点枚举名）：Record<site, VideoRoute> */
+  VIDEO_ROUTE: 'larksnap:video-route',
 } as const;
 
 /** UI ↔ 背景 的消息类型 */
@@ -27,6 +29,8 @@ export const MSG = {
   EXPORT_ATTACHMENTS: 'export_attachments',
   EXPORT_XHS: 'export_xhs',
   EXPORT_WECHAT: 'export_wechat',
+  /** 整页长图截图（任意网页，输出 PNG/PDF），data={ format } */
+  EXPORT_SCREENSHOT: 'export_screenshot',
   // 缓存
   CACHE_DOC: 'cache_doc',
   CACHE_LIST: 'cache_list',
@@ -59,10 +63,27 @@ export const MSG = {
   DOWNLOAD_VIDEO: 'download_video',
   /** 查询当前标签页是否支持视频下载 + 桥接是否就绪（决定侧边栏入口显隐） */
   GET_VIDEO_STATE: 'get_video_state',
+  /** 探测当前视频的可用清晰度档位（daemon 跑 yt-dlp -J） */
+  PROBE_VIDEO: 'probe_video',
+  /** 拉取视频下载任务列表（含排队/进行中/已结束） */
+  LIST_VIDEO_TASKS: 'list_video_tasks',
+  /** 清除已结束（成功/失败）的下载任务 */
+  CLEAR_VIDEO_TASKS: 'clear_video_tasks',
+  /** SW → UI：任务列表变化推送（全量） */
+  VIDEO_TASKS: 'video_tasks',
   // 标签页链接复制
   COPY_TABS: 'copy_tabs',
   // UI → SW：匿名统计事件（SW 统一收口上报）
   TRACK: 'track',
+  // ---- YouTube 字幕 + AI 总结（004）----
+  /** 判断当前页类型：feishu / youtube / generic / restricted（侧边栏三态入口用） */
+  GET_PAGE_KIND: 'get_page_kind',
+  /** 导出 YouTube 字幕：data={ lang?, mode:'download'|'copy' } */
+  EXPORT_TRANSCRIPT: 'export_transcript',
+  /** 列出当前视频的字幕轨（语言选择用） */
+  LIST_CAPTION_TRACKS: 'list_caption_tracks',
+  /** AI 总结当前页（YouTube 字幕 / 网页正文），未配置端点或未确认时返回引导态 */
+  SUMMARIZE_PAGE: 'summarize_page',
 } as const;
 
 /** SW ⇄ offscreen 页的消息类型（小红书卡片渲染，§六） */
@@ -71,6 +92,10 @@ export const OFFSCREEN_MSG = {
   XHS_RENDER: 'offscreen_xhs_render',
   /** offscreen → SW：单张卡片渲染进度（fire-and-forget） */
   XHS_PROGRESS: 'offscreen_xhs_progress',
+  /** SW → offscreen：整页截图拼接请求，data 为 ShotStitchRequest，响应带 ShotStitchResult */
+  SHOT_STITCH: 'offscreen_shot_stitch',
+  /** offscreen → SW：逐屏拼接进度（fire-and-forget） */
+  SHOT_PROGRESS: 'offscreen_shot_progress',
 } as const;
 
 /** content script 内部消息类型（背景 → content） */
@@ -92,6 +117,14 @@ export const CONTENT_MSG = {
   WEBCOPY_UNLOCK: 'webcopy_unlock',
   /** 查询挂载状态（unlocked 等） */
   WEBCOPY_STATE: 'webcopy_state',
+} as const;
+
+/** YouTube 字幕 content script（youtube.js）的内部消息类型（背景 → content） */
+export const YT_MSG = {
+  /** 抓当前视频字幕：data={ lang? }，响应 TranscriptResult */
+  GET_TRANSCRIPT: 'yt_get_transcript',
+  /** 列出字幕轨：响应 CaptionTrackInfo[] */
+  LIST_TRACKS: 'yt_list_tracks',
 } as const;
 
 /** POST 校验用的 CSRF cookie 候选名（按序尝试，失败换名重试） */
@@ -126,6 +159,7 @@ export const ISSUES_URL = 'https://github.com/AmbroseX/larksnap/issues';
 
 /** 默认配置 */
 export const DEFAULT_CONFIG: ExtensionConfig = {
+  language: 'auto',
   imageMode: 'download',
   feedbackUrl: `${ISSUES_URL}/new`,
   diagnosticIncludeSnapshot: true,
@@ -135,6 +169,9 @@ export const DEFAULT_CONFIG: ExtensionConfig = {
     autoCopyMinChars: 5,
     autoCopyFormat: 'text',
     tabCopyFormat: 'markdown',
+    frontmatter: true,
+    pageImageMode: 'link',
   },
   analyticsEnabled: true,
+  videoProxy: { scheme: 'http', host: '', port: '', bypass: '', proxyOnly: '' },
 };

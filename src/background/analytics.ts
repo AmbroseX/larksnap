@@ -18,6 +18,8 @@ const EVENT_WHITELIST: ReadonlySet<TrackEventName> = new Set([
   'webcopy',
   'bridge',
   'edit',
+  // AI 总结：data 只带 {kind, ok, chunks, secs} 枚举/数值，无内容/URL/端点（FR-006）
+  'summarize',
 ]);
 
 /** 上报一次事件。即发即弃，调用方无需 await。 */

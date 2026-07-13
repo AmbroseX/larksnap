@@ -17,6 +17,7 @@ export async function getConfig(): Promise<ExtensionConfig> {
     ...stored,
     // 嵌套对象单独合并，避免老版本存量配置缺新字段
     webcopy: { ...DEFAULT_CONFIG.webcopy, ...stored.webcopy },
+    videoProxy: { ...DEFAULT_CONFIG.videoProxy, ...stored.videoProxy },
   };
 }
 
