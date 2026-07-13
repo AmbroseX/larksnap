@@ -36,7 +36,6 @@
   },
   "action": {
     "default_title": "__MSG_appName__",
-    "default_popup": "popup.html",
     "default_icon": {
       "16": "icons/icon-16.png",
       "32": "icons/icon-32.png",
@@ -47,6 +46,23 @@
   "options_page": "options.html",
   "side_panel": {
     "default_path": "sidepanel.html"
+  },
+  "commands": {
+    "open-panel": {
+      "suggested_key": { "default": "Ctrl+Shift+L", "mac": "Command+Shift+L" },
+      "description": "__MSG_cmdOpenPanel__"
+    },
+    "page-md": {
+      "suggested_key": { "default": "Ctrl+Shift+M", "mac": "Command+Shift+M" },
+      "description": "__MSG_cmdPageMd__"
+    },
+    "screenshot": {
+      "suggested_key": { "default": "Ctrl+Shift+S", "mac": "Command+Shift+S" },
+      "description": "__MSG_cmdScreenshot__"
+    },
+    "summarize": {
+      "description": "__MSG_cmdSummarize__"
+    }
   },
   "content_scripts": [],
   "icons": {

@@ -15,6 +15,10 @@ let _contentTabId: number | null = null;
 export function setContentTab(tabId: number | null): void {
   _contentTabId = tabId;
 }
+/** 读当前覆盖值（006 分发层导出期间做「保存-恢复」，避免与桥接任务互踩） */
+export function getContentTab(): number | null {
+  return _contentTabId;
+}
 
 /**
  * SW 侧代发飞书内部接口的代理 —— 实际请求由 content script 同源发起（宪法原则 I）。

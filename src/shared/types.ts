@@ -383,13 +383,17 @@ export interface RuntimeState {
 
 // ==================== YouTube 字幕 + AI 总结（004） ====================
 
-/** 侧边栏三态路由的页面类型（FR-009：飞书页现状不动，其余按站点出入口） */
-export type PageKind = 'feishu' | 'youtube' | 'generic' | 'restricted';
+/** 侧边栏页面类型（006：新增 video——youtube 之外的可下载视频站点） */
+export type PageKind = 'feishu' | 'youtube' | 'video' | 'generic' | 'restricted';
 
 /** GET_PAGE_KIND 的响应 */
 export interface PageKindInfo {
   kind: PageKind;
   url?: string;
+  /** 页面标题（侧边栏识别条展示用） */
+  title?: string;
+  /** kind 为 youtube/video 时的站点枚举名（bilibili/youtube/douyin/tiktok） */
+  videoSite?: string;
 }
 
 /** 一条字幕轨（语言选择用） */
@@ -438,6 +442,121 @@ export interface SummaryNeedsAck {
   needsAck: true;
   /** 一次性告知框里展示的端点域名 */
   endpointOrigin: string;
+}
+
+// ==================== AI 对话页与流式总结（007） ====================
+
+/**
+ * 会话内一条消息（存储形态）。发送给端点前由 SW 经 prompts 模板转换：
+ * kind='source' 的首轮取材消息会包上总结指令，其余原样透传。
+ */
+export interface ChatMsg {
+  role: 'user' | 'assistant';
+  content: string;
+  /** 首轮取材消息（页面全文/字幕）：UI 渲染为「已读取内容」小条，不展开原文 */
+  kind?: 'source';
+  /** 生成被用户停止或中途失败，内容不完整 */
+  stopped?: boolean;
+}
+
+/** 一个 AI 会话。存 storage.session，按字节配额裁最旧（chat-port 落盘时执行） */
+export interface ChatSession {
+  id: string;
+  /** 取页面标题 */
+  title: string;
+  target: { tabId: number; url: string };
+  /** 取材来源（统计与展示用枚举，不含 URL） */
+  sourceKind: 'youtube' | 'page';
+  /** 取材降级提示（如「无字幕，用标题+简介总结」） */
+  note?: string;
+  messages: ChatMsg[];
+  createdAt: number;
+  updatedAt: number;
+}
+
+/** SUMMARIZE_PREPARE 成功数据：取材已缓存在 SW 内存，凭 sourceId 在 Port 上开跑 */
+export interface SummaryPrepared {
+  sourceId: string;
+  title: string;
+  sourceKind: 'youtube' | 'page';
+  /** 取材字符数（UI 展示「已读取 N 字」） */
+  chars: number;
+  note?: string;
+}
+
+/** 会话列表条目（下拉用，不带 messages 全量） */
+export interface ChatSessionMeta {
+  id: string;
+  title: string;
+  sourceKind: 'youtube' | 'page';
+  updatedAt: number;
+}
+
+/** 对话 Port：UI → SW。requestId 由 UI 每次生成自增分配 */
+export type ChatClientMsg =
+  | { type: 'start-summary'; requestId: number; sourceId: string }
+  | { type: 'ask'; requestId: number; sessionId: string; text: string }
+  | { type: 'stop'; requestId: number };
+
+/** 对话 Port：SW → UI。UI 只认等于当前 requestId 的事件，迟到的旧流直接丢弃 */
+export type ChatServerMsg =
+  | { type: 'accepted'; requestId: number; session: ChatSession }
+  | { type: 'progress'; requestId: number; current: number; total: number }
+  | { type: 'delta'; requestId: number; text: string }
+  | { type: 'done'; requestId: number; message: ChatMsg }
+  | { type: 'error'; requestId: number; kind: string; message: string };
+
+// ==================== 交互入口与动作分发（006） ====================
+
+/** 统一动作枚举：右键菜单项、快捷键 command、侧边栏入口都收敛到它 */
+export type ActionId =
+  | 'page-md'
+  | 'selection-md'
+  | 'screenshot'
+  | 'summarize'
+  | 'unlock'
+  | 'open-panel'
+  | 'feishu-md'
+  | 'feishu-pdf'
+  | 'feishu-html';
+
+/**
+ * 动作分发上下文：触发瞬间捕获目标标签页，全链路显式传递。
+ * 约定：dispatch 之下的任何实现禁止再查询「当前活动标签页」。
+ */
+export interface DispatchContext {
+  tabId: number;
+  url: string;
+  /** 触发来源：右键菜单 / 键盘快捷键 / 侧边栏按钮 */
+  source: 'menu' | 'command' | 'panel';
+}
+
+/** 后台触发动作的任务记录（storage.session，键按 tabId 分片） */
+export interface TaskRecord {
+  id: string;
+  tabId: number;
+  actionId: ActionId;
+  status: 'running' | 'success' | 'error';
+  /** status='error' 时的失败原因（已本地化，UI 直接展示） */
+  error?: string;
+  startedAt: number;
+  endedAt?: number;
+}
+
+/** 右键/快捷键触发「AI 总结」时传给侧边栏的一次性导航意图（读到即删） */
+export interface NavigationIntent {
+  target: 'summary';
+  autoStart: boolean;
+  tabId: number;
+  url: string;
+  /** 写入时间：超过 30s 未被消费视为过期丢弃 */
+  createdAt: number;
+}
+
+/** 侧边栏界面偏好（storage.local，与 config 解耦） */
+export interface UiPrefs {
+  /** 通用工具区各分组的折叠态；缺省时剪藏展开、其余折叠 */
+  collapsedGroups: Record<string, boolean>;
 }
 
 // ==================== 消息协议 ====================

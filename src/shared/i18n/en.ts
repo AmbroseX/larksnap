@@ -22,6 +22,11 @@ export const en: Dict = {
       link: 'Keep online links',
     },
     feedbackUrl: 'Feedback page URL',
+    shortcuts: {
+      label: 'Keyboard shortcuts',
+      desc: 'Open panel Ctrl/Cmd+Shift+L · Page to Markdown Ctrl/Cmd+Shift+M · Full-page screenshot Ctrl/Cmd+Shift+S; "AI summary" has no default key and can be configured.',
+      open: 'Open browser shortcut settings',
+    },
     diagnosticIncludeSnapshot: 'Include page snapshot in diagnostics',
     analytics:
       'Anonymous usage statistics (feature usage counts and version only — no document content, URLs, or identity; see the privacy policy on the project homepage)',
@@ -134,7 +139,27 @@ export const en: Dict = {
       'Fetching this page in the background via the CLI (larksnap-fetch) requires authorizing this domain first.',
     authorizing: 'Authorizing...',
     authorize: 'Authorize this domain',
-    restrictedPage: 'Browser reserved page; transcript and AI summary are unavailable',
+    restrictedPage: 'This is a browser reserved page; the extension cannot operate here',
+    // ---- 006 sidebar refactor ----
+    tabTools: 'Tools',
+    tabChat: 'AI Chat',
+    sectionContext: 'This page',
+    sectionTools: 'Tools',
+    headerSettings: 'Settings',
+    headerCache: 'Cache library',
+    publishRow: 'Publish',
+    groupWebcopy: 'Web clipper',
+    groupScreenshot: 'Screenshot',
+    groupSummary: 'AI summary',
+    groupToggles: 'Page toggles',
+    lastTaskFailed: 'Last background task failed: {msg}',
+    pageKind: {
+      feishu: 'Feishu',
+      youtube: 'YouTube video',
+      video: 'Video page · {site}',
+      generic: 'Web page',
+      restricted: 'Restricted page',
+    },
     xhsDefaultTitle: 'Feishu Document',
     wechatCopied: 'WeChat format copied. Paste it into the WeChat editor.',
     themePreview: {
@@ -202,6 +227,28 @@ export const en: Dict = {
     copyMd: 'Copy Markdown',
     clipboardFailed: 'Clipboard write failed; copy manually from the result box',
     partial: 'Summary failed midway; partial result below (incomplete)',
+  },
+
+  chat: {
+    entry: 'Open AI chat',
+    entrySub: 'Summarize this page and ask follow-ups, with streaming Markdown output',
+    summarizeNow: 'Summarize this page',
+    history: 'History',
+    emptyHint:
+      'Click "Summarize this page" to send the page content/transcript to your AI endpoint, then ask follow-up questions.',
+    preparing: 'Reading page content…',
+    thinking: 'Waiting for the model…',
+    chunkProgress: 'Long content, summarizing in chunks ({current}/{total})…',
+    sourceChip: '~{chars} chars captured',
+    stopped: 'Stopped; incomplete',
+    stop: 'Stop',
+    send: 'Send',
+    placeholder: 'Ask a follow-up… (Enter to send, Shift+Enter for newline)',
+    newSession: 'New chat',
+    qpKeyPoints: 'Extract key points',
+    qpOneLiner: 'One-sentence takeaway',
+    qpActions: 'List action items',
+    qpExplain: 'Explain in plain words',
   },
 
   webcopy: {
@@ -310,9 +357,17 @@ export const en: Dict = {
   },
 
   menu: {
+    root: 'LarkSnap',
     pageMd: 'Page to Markdown (copy)',
     selectionMd: 'Selection to Markdown (copy)',
     unlock: 'Remove copy restrictions (on/off)',
+    screenshot: 'Full-page screenshot (PNG)',
+    summarize: 'Summarize this page with AI',
+    openPanel: 'Open LarkSnap panel',
+    feishuMd: 'Export as Markdown',
+    feishuPdf: 'Export as PDF',
+    feishuHtml: 'Export as HTML',
+    feishuMore: 'More export options…',
   },
 
   toast: {
@@ -371,6 +426,10 @@ export const en: Dict = {
     llmAuth: 'API Key invalid or unauthorized (401/403); check it in Settings',
     llmBadStatus: 'AI endpoint returned {status}; check the model name and endpoint config',
     llmEmpty: 'AI returned empty or malformed content (an OpenAI-compatible API is required)',
+    llmOverflow: 'Content exceeds the model context length',
+    llmAborted: 'Generation stopped',
+    chatSourceExpired: 'Page content capture expired; start the summary again',
+    chatSessionGone: 'Session not found or cleaned up; start a new one',
   },
 
   progress: {
@@ -415,6 +474,7 @@ export const en: Dict = {
       offscreenNoResponse: 'No response from the offscreen stitching page',
       offscreenFailed: 'Offscreen stitching failed',
       captureFailed: 'Capture failed; click the extension icon and retry ({msg})',
+      needAuth: 'Capturing this page needs permission; click “Allow” in the prompt',
       rateLimited: 'Capture rate limited; retries failed, please try again later',
       defaultName: 'screenshot',
     },

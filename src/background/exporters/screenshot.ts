@@ -16,16 +16,20 @@ import { withOffscreen } from '../offscreen';
 import { downloadDataUrl, safeName } from '../download';
 import { captureFullPage } from '../screenshot/capture';
 
-export async function exportScreenshot(format: ScreenshotFormat): Promise<Response> {
+/** tabId 由调用方在触发瞬间捕获并显式传入（006：禁止在此重查活动页） */
+export async function exportScreenshot(format: ScreenshotFormat, tabId: number): Promise<Response> {
   await reportProgress('screenshot', 'running', t('progress.screenshot.preparing'));
+  // 缺主机权限时回给侧边栏做手势内授权重试用（catch 里要用，故提前拿）
+  let originPattern = '';
   try {
-    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+    const tab = await chrome.tabs.get(tabId).catch(() => null);
     if (!tab?.id) throw new Error(t('progress.screenshot.noTab'));
     const url = tab.url || '';
     // chrome:// / 扩展商店等不可注入页直接友好报错，不静默失败（FR-001）
     if (!/^https?:\/\//i.test(url)) {
       throw new Error(t('progress.screenshot.unsupportedPage'));
     }
+    originPattern = `*://${new URL(url).hostname}/*`;
 
     // 逐屏抓取（capture 内部 finally 已保证页面现场恢复）
     const cap = await captureFullPage(tab, (n) =>
@@ -53,6 +57,16 @@ export async function exportScreenshot(format: ScreenshotFormat): Promise<Respon
     return { success: true, data: { truncated: !!result.truncated } };
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
+    // captureVisibleTab 缺 activeTab/主机权限：侧边栏点按钮的手势不给网页页授 activeTab，
+    // 走 needsPermission 让侧边栏在同一手势里 permissions.request 后重试（同 webcopy 辅路径）。
+    if (originPattern && /all_urls|activeTab/i.test(msg)) {
+      await reportProgress('screenshot', 'error', t('progress.screenshot.needAuth'));
+      return {
+        success: false,
+        error: t('progress.screenshot.needAuth'),
+        data: { needsPermission: true, originPattern },
+      };
+    }
     await reportProgress('screenshot', 'error', t('progress.screenshot.failed', { msg }));
     return { success: false, error: msg };
   }

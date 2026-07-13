@@ -11,7 +11,7 @@ import type {
   VideoState,
   VideoTaskInfo,
 } from '../shared/types';
-import { MSG, STORAGE_KEYS, VIDEO_SITES } from '../shared/constants';
+import { MSG, STORAGE_KEYS } from '../shared/constants';
 import { getConfig } from '../shared/storage';
 import {
   requestVideoDownload,
@@ -65,20 +65,8 @@ function bypassMatch(bypass: string, host: string): boolean {
   return false;
 }
 import { t } from '../shared/i18n';
-
-/** hostname 命中站点表则返回站点枚举名 */
-function matchSite(url: string): string | null {
-  let host: string;
-  try {
-    host = new URL(url).hostname.toLowerCase();
-  } catch {
-    return null;
-  }
-  for (const { site, hosts } of VIDEO_SITES) {
-    if (hosts.some((h) => host === h || host.endsWith(`.${h}`))) return site;
-  }
-  return null;
-}
+// 站点识别已收敛到 shared/page-kind（006）
+import { matchVideoSite as matchSite } from '../shared/page-kind';
 
 async function activeTab(): Promise<chrome.tabs.Tab | null> {
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });

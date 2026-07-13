@@ -11,7 +11,17 @@ export async function getActiveTab(): Promise<chrome.tabs.Tab | null> {
 }
 
 /**
- * 识别当前活跃 Tab 的飞书文档信息。
+ * 识别当前活跃 Tab 的飞书文档信息（仅限侧边栏只读场景；
+ * 动作链路请用 detectDocForTab，禁止在分发层之下重查活动页——006）。
+ */
+export async function detectActiveDoc(): Promise<DocInfo | null> {
+  const tab = await getActiveTab();
+  if (!tab?.id) return null;
+  return detectDocForTab(tab.id);
+}
+
+/**
+ * 识别指定 Tab 的飞书文档信息。tabId 由调用方在触发瞬间捕获。
  *
  * 流程（§4.4 交互）：
  *   1. 先用**纯 URL** 识别（无需注入，故未授权的私有化域名也能判出 isPrivateDeploy）
@@ -19,8 +29,8 @@ export async function getActiveTab(): Promise<chrome.tabs.Tab | null> {
  *   3. 私有化且未授权该 origin → 返回 needsAuth=true，由 UI 引导用户手势授权
  *   4. 已授权 → 注入 content 取完整信息（含 DOM 标题）
  */
-export async function detectActiveDoc(): Promise<DocInfo | null> {
-  const tab = await getActiveTab();
+export async function detectDocForTab(tabId: number): Promise<DocInfo | null> {
+  const tab = await chrome.tabs.get(tabId).catch(() => null);
   if (!tab?.id || !tab.url) return null;
 
   const urlInfo = detectDocFromUrl(tab.url);

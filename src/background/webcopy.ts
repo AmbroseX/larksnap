@@ -6,8 +6,7 @@ import type {
   WebCopyState,
 } from '../shared/types';
 import { CONTENT_MSG } from '../shared/constants';
-import { ensureI18n, onLanguageChanged, t } from '../shared/i18n';
-import { getActiveTab } from './doc-detect';
+import { t } from '../shared/i18n';
 import { findAdapter, type AdapterExtractResult, type SiteAdapter } from './webcopy-adapters';
 import { track } from './analytics';
 
@@ -18,106 +17,54 @@ function trackWebcopy(action: 'page' | 'selection' | 'unlock' | 'tabs'): void {
 
 /**
  * webcopy 的 SW 侧（技术方案 §2 / §6）：
- *   - 右键菜单注册与分发（主触发路径，手势稳定授予 activeTab）
+ *   - 右键/快捷键入口的页内转换（手势在页面里，页面侧写剪贴板；入口注册在 context-menus.ts）
  *   - 侧边栏消息的注入调度（辅路径，注入失败回 needsPermission 让 UI 兜底授权）
  *   - 标签页链接复制（SW 只拼串，剪贴板由侧边栏写）
  * 不碰飞书协议栈，不碰剪贴板。
  */
 
-const MENU_ID = {
-  PAGE_MD: 'webcopy-page-md',
-  SELECTION_MD: 'webcopy-selection-md',
-  UNLOCK: 'webcopy-unlock',
-} as const;
+// 判定逻辑已收敛到 shared/page-kind（006）；转发导出，既有引用方不受影响
+import { isRestrictedUrl } from '../shared/page-kind';
+export { isRestrictedUrl };
 
-/** 浏览器保留页面，无法注入任何脚本（bridge 后台通道也复用此判断） */
-export function isRestrictedUrl(url: string): boolean {
-  return (
-    !/^https?:/i.test(url) ||
-    url.startsWith('https://chrome.google.com/webstore') ||
-    url.startsWith('https://chromewebstore.google.com')
-  );
-}
+// 右键菜单的注册与分发已迁至 context-menus.ts（006 阶段1b），webcopy 只留剪藏管线
 
-/** 菜单标题取当前语言，先等 i18n 就绪；removeAll+create 幂等，语言切换时重建 */
-async function registerMenus(): Promise<void> {
-  await ensureI18n();
-  chrome.contextMenus.removeAll(() => {
-    chrome.contextMenus.create({
-      id: MENU_ID.PAGE_MD,
-      title: t('menu.pageMd'),
-      contexts: ['page'],
-    });
-    chrome.contextMenus.create({
-      id: MENU_ID.SELECTION_MD,
-      title: t('menu.selectionMd'),
-      contexts: ['selection'],
-    });
-    chrome.contextMenus.create({
-      id: MENU_ID.UNLOCK,
-      title: t('menu.unlock'),
-      contexts: ['page', 'selection'],
-    });
-  });
-}
+// ---------- 右键/快捷键入口（手势在页面里，剪贴板由页面侧写）----------
 
-/** SW 启动时调用一次。MV3 SW 会休眠重启，监听器必须在模块顶层同步注册。 */
-export function setupWebcopy(): void {
-  chrome.runtime.onInstalled.addListener(() => void registerMenus());
-  chrome.runtime.onStartup.addListener(() => void registerMenus());
-  // 设置页切换语言 → 用新语言重建右键菜单
-  onLanguageChanged(() => void registerMenus());
-
-  chrome.contextMenus.onClicked.addListener(async (info, tab) => {
-    if (!tab?.id || !tab.url || isRestrictedUrl(tab.url)) return;
-    await ensureI18n();
-    trackWebcopy(
-      info.menuItemId === MENU_ID.PAGE_MD
-        ? 'page'
-        : info.menuItemId === MENU_ID.SELECTION_MD
-          ? 'selection'
-          : 'unlock'
-    );
-    try {
-      // 百度文库等特殊站点：整页转换走适配器（主世界抓正文），并在主世界写剪贴板
-      if (info.menuItemId === MENU_ID.PAGE_MD) {
-        const adapter = findAdapter(tab.url);
-        if (adapter) {
-          const result = await runAdapter(tab.id, adapter);
-          if (result?.abort) {
-            // 确定性失败（登录墙/风控/不存在）：提示原因，不退通用管线
-            await toastInMainWorld(tab.id, result.note || t('bg.pageUnfetchable'));
-            return;
-          }
-          if (result) {
-            await copyInMainWorld(tab.id, result.markdown);
-            return;
-          }
-          // 适配器不适用此页：继续走通用管线
-        }
-      }
-
-      await injectWebcopy(tab.id);
-      // 右键菜单手势在页面里，content 自己写剪贴板 + toast
-      switch (info.menuItemId) {
-        case MENU_ID.PAGE_MD:
-          await sendToTab(tab.id, CONTENT_MSG.WEBCOPY_PAGE_TO_MD, {
-            writeClipboard: true,
-          });
-          break;
-        case MENU_ID.SELECTION_MD:
-          await sendToTab(tab.id, CONTENT_MSG.WEBCOPY_SELECTION_TO_MD, {
-            writeClipboard: true,
-          });
-          break;
-        case MENU_ID.UNLOCK:
-          await sendToTab(tab.id, CONTENT_MSG.WEBCOPY_UNLOCK, {});
-          break;
-      }
-    } catch (e) {
-      console.warn('[webcopy] 右键菜单执行失败:', e);
+/** 整页转 MD（页内反馈版）：适配器主世界路径 + 通用管线，content 自己写剪贴板 + toast */
+export async function webcopyPageMdInPage(tabId: number, url: string): Promise<Response> {
+  trackWebcopy('page');
+  // 百度文库等特殊站点：整页转换走适配器（主世界抓正文），并在主世界写剪贴板
+  const adapter = findAdapter(url);
+  if (adapter) {
+    const result = await runAdapter(tabId, adapter);
+    if (result?.abort) {
+      // 确定性失败（登录墙/风控/不存在）：提示原因，不退通用管线
+      await toastInMainWorld(tabId, result.note || t('bg.pageUnfetchable'));
+      return { success: false, error: result.note || t('bg.pageUnfetchable') };
     }
-  });
+    if (result) {
+      await copyInMainWorld(tabId, result.markdown);
+      return { success: true };
+    }
+    // 适配器不适用此页：继续走通用管线
+  }
+  await injectWebcopy(tabId);
+  return sendToTab(tabId, CONTENT_MSG.WEBCOPY_PAGE_TO_MD, { writeClipboard: true });
+}
+
+/** 选区转 MD（页内反馈版） */
+export async function webcopySelectionMdInPage(tabId: number): Promise<Response> {
+  trackWebcopy('selection');
+  await injectWebcopy(tabId);
+  return sendToTab(tabId, CONTENT_MSG.WEBCOPY_SELECTION_TO_MD, { writeClipboard: true });
+}
+
+/** 解锁开关切换（页内反馈版，缺省取反） */
+export async function webcopyUnlockInPage(tabId: number): Promise<Response> {
+  trackWebcopy('unlock');
+  await injectWebcopy(tabId);
+  return sendToTab(tabId, CONTENT_MSG.WEBCOPY_UNLOCK, {});
 }
 
 export async function injectWebcopy(tabId: number): Promise<void> {
@@ -207,31 +154,29 @@ export async function sendToTab<T = unknown>(
 }
 
 /**
- * 侧边栏路径的公共前置：拿活跃标签页并注入。
+ * 侧边栏路径的公共前置：对指定标签页注入（tabId/url 由调用方在触发瞬间捕获——006）。
  * 注入失败（无 activeTab、无 host 权限）→ 回 needsPermission，
  * 由侧边栏在同一手势里 chrome.permissions.request 后重试。
  */
 async function withInjectedTab<T>(
+  tabId: number,
+  url: string,
   run: (tabId: number) => Promise<Response<T>>
 ): Promise<Response<T | WebCopyNeedsPermission>> {
-  const tab = await getActiveTab();
-  if (!tab?.id || !tab.url) {
-    return { success: false, error: t('bg.noActiveTab') };
-  }
-  if (isRestrictedUrl(tab.url)) {
+  if (isRestrictedUrl(url)) {
     return { success: false, error: t('bg.restrictedWebcopy') };
   }
   try {
-    await injectWebcopy(tab.id);
+    await injectWebcopy(tabId);
   } catch {
-    const host = new URL(tab.url).hostname;
+    const host = new URL(url).hostname;
     return {
       success: false,
       error: t('bg.noPermissionMenu'),
       data: { needsPermission: true, originPattern: `*://${host}/*` },
     };
   }
-  return run(tab.id);
+  return run(tabId);
 }
 
 /**
@@ -254,20 +199,19 @@ export async function runAdapter(
 }
 
 /** 整页转 Markdown（结果回传侧边栏，由侧边栏写剪贴板/下载） */
-export async function webcopyPageMd(): Promise<
-  Response<WebCopyMdResult | WebCopyNeedsPermission>
-> {
+export async function webcopyPageMd(
+  tabId: number,
+  url: string
+): Promise<Response<WebCopyMdResult | WebCopyNeedsPermission>> {
   trackWebcopy('page');
-  const tab = await getActiveTab();
-  if (!tab?.id || !tab.url) return { success: false, error: t('bg.noActiveTab') };
-  if (isRestrictedUrl(tab.url)) {
+  if (isRestrictedUrl(url)) {
     return { success: false, error: t('bg.restrictedWebcopy') };
   }
 
-  const adapter = findAdapter(tab.url);
+  const adapter = findAdapter(url);
   if (adapter) {
     try {
-      const result = await runAdapter(tab.id, adapter);
+      const result = await runAdapter(tabId, adapter);
       if (result?.abort) {
         // 确定性失败（登录墙/风控/不存在）：回明确错误，不退通用管线
         return { success: false, error: result.note || t('bg.pageUnfetchable') };
@@ -275,7 +219,7 @@ export async function webcopyPageMd(): Promise<
       if (result) return { success: true, data: result };
       // 适配器不适用此页：退回通用管线
     } catch {
-      const host = new URL(tab.url).hostname;
+      const host = new URL(url).hostname;
       return {
         success: false,
         error: t('bg.noPermissionMenu'),
@@ -284,33 +228,33 @@ export async function webcopyPageMd(): Promise<
     }
   }
 
-  return withInjectedTab<WebCopyMdResult>((tabId) =>
-    sendToTab<WebCopyMdResult>(tabId, CONTENT_MSG.WEBCOPY_PAGE_TO_MD, {})
+  return withInjectedTab<WebCopyMdResult>(tabId, url, (id) =>
+    sendToTab<WebCopyMdResult>(id, CONTENT_MSG.WEBCOPY_PAGE_TO_MD, {})
   );
 }
 
 /** 选区转 Markdown */
-export function webcopySelectionMd() {
+export function webcopySelectionMd(tabId: number, url: string) {
   trackWebcopy('selection');
-  return withInjectedTab<WebCopyMdResult>((tabId) =>
-    sendToTab<WebCopyMdResult>(tabId, CONTENT_MSG.WEBCOPY_SELECTION_TO_MD, {})
+  return withInjectedTab<WebCopyMdResult>(tabId, url, (id) =>
+    sendToTab<WebCopyMdResult>(id, CONTENT_MSG.WEBCOPY_SELECTION_TO_MD, {})
   );
 }
 
 /** 解锁开关 */
-export function webcopyToggleUnlock(enabled: boolean) {
+export function webcopyToggleUnlock(tabId: number, url: string, enabled: boolean) {
   trackWebcopy('unlock');
-  return withInjectedTab<{ enabled: boolean }>((tabId) =>
-    sendToTab<{ enabled: boolean }>(tabId, CONTENT_MSG.WEBCOPY_UNLOCK, {
+  return withInjectedTab<{ enabled: boolean }>(tabId, url, (id) =>
+    sendToTab<{ enabled: boolean }>(id, CONTENT_MSG.WEBCOPY_UNLOCK, {
       enabled,
     })
   );
 }
 
 /** 仅确保已注入（侧边栏打开自动复制开关时用） */
-export function webcopyEnsure() {
-  return withInjectedTab<WebCopyState>((tabId) =>
-    sendToTab<WebCopyState>(tabId, CONTENT_MSG.WEBCOPY_STATE, {})
+export function webcopyEnsure(tabId: number, url: string) {
+  return withInjectedTab<WebCopyState>(tabId, url, (id) =>
+    sendToTab<WebCopyState>(id, CONTENT_MSG.WEBCOPY_STATE, {})
   );
 }
 
@@ -318,11 +262,10 @@ export function webcopyEnsure() {
  * 查询挂载状态：只 sendMessage 不注入。
  * 没有 content 接收方（从未激活）→ mounted=false，保持零侵入。
  */
-export async function webcopyGetState(): Promise<Response<WebCopyState>> {
-  const tab = await getActiveTab();
-  if (!tab?.id) return { success: true, data: { mounted: false, unlocked: false } };
+export async function webcopyGetState(tabId: number | null): Promise<Response<WebCopyState>> {
+  if (tabId == null) return { success: true, data: { mounted: false, unlocked: false } };
   try {
-    const res = await sendToTab<WebCopyState>(tab.id, CONTENT_MSG.WEBCOPY_STATE, {});
+    const res = await sendToTab<WebCopyState>(tabId, CONTENT_MSG.WEBCOPY_STATE, {});
     if (res.success && res.data) return res;
   } catch {
     // 无接收方：未挂载

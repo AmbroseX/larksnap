@@ -4,11 +4,11 @@ import type {
   TranscriptResult,
   WebCopyNeedsPermission,
 } from '../../shared/types';
-import { VIDEO_SITES, YT_MSG } from '../../shared/constants';
+import { YT_MSG } from '../../shared/constants';
 import { reportProgress } from '../progress';
 import { downloadDataUrl, safeName } from '../download';
 import { getActiveTab } from '../doc-detect';
-import { isRestrictedUrl, sendToTab } from '../webcopy';
+import { sendToTab } from '../webcopy';
 import { t as i18n } from '../../shared/i18n';
 
 /**
@@ -16,18 +16,9 @@ import { t as i18n } from '../../shared/i18n';
  * 落盘或回传文本给侧边栏复制。全程只有 YouTube 同源请求，产物只落本地（宪法 V）。
  */
 
-/** 是否 YouTube 视频观看页：host 复用 VIDEO_SITES 的 youtube 列表，仅 /watch 路径算 */
-export function isYoutubeWatchUrl(url: string): boolean {
-  if (!url || isRestrictedUrl(url)) return false;
-  try {
-    const u = new URL(url);
-    const hosts = VIDEO_SITES.find((s) => s.site === 'youtube')?.hosts ?? [];
-    const hit = hosts.some((h) => u.hostname === h || u.hostname.endsWith(`.${h}`));
-    return hit && u.pathname === '/watch' && !!u.searchParams.get('v');
-  } catch {
-    return false;
-  }
-}
+// 判定逻辑已收敛到 shared/page-kind（006）；转发导出，既有引用方不受影响
+import { isYoutubeWatchUrl } from '../../shared/page-kind';
+export { isYoutubeWatchUrl };
 
 /** 注入 youtube.js（脚本自身有幂等标记，重复注入无副作用） */
 async function injectYoutube(tabId: number): Promise<void> {

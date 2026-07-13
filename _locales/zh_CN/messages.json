@@ -6,5 +6,21 @@
   "appDesc": {
     "message": "在飞书文档页面一键导出为 Markdown / PDF / HTML，批量下载附件，支持离线缓存；任意网页一键转 Markdown、解除复制限制、选中自动复制。",
     "description": "扩展描述（应用商店与管理页）"
+  },
+  "cmdOpenPanel": {
+    "message": "打开 LarkSnap 侧边栏",
+    "description": "快捷键描述（chrome://extensions/shortcuts）"
+  },
+  "cmdPageMd": {
+    "message": "当前页转 Markdown 并复制",
+    "description": "快捷键描述"
+  },
+  "cmdScreenshot": {
+    "message": "整页截图（PNG）",
+    "description": "快捷键描述"
+  },
+  "cmdSummarize": {
+    "message": "AI 总结本页",
+    "description": "快捷键描述（默认无键，用户可自行配置）"
   }
 }

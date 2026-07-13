@@ -6,5 +6,21 @@
   "appDesc": {
     "message": "One-click export of Feishu/Lark docs to Markdown / PDF / HTML with batch attachment download and offline cache; convert any web page to Markdown, remove copy restrictions, and auto-copy selections.",
     "description": "Extension description (store and management page)"
+  },
+  "cmdOpenPanel": {
+    "message": "Open LarkSnap side panel",
+    "description": "Command description (chrome://extensions/shortcuts)"
+  },
+  "cmdPageMd": {
+    "message": "Convert current page to Markdown and copy",
+    "description": "Command description"
+  },
+  "cmdScreenshot": {
+    "message": "Full-page screenshot (PNG)",
+    "description": "Command description"
+  },
+  "cmdSummarize": {
+    "message": "Summarize this page with AI",
+    "description": "Command description (no default key; user-configurable)"
   }
 }

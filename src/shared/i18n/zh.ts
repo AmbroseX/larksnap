@@ -23,6 +23,11 @@ export const zh = {
       link: '保留在线链接',
     },
     feedbackUrl: '反馈页面地址',
+    shortcuts: {
+      label: '键盘快捷键',
+      desc: '打开面板 Ctrl/Cmd+Shift+L · 整页转 Markdown Ctrl/Cmd+Shift+M · 整页截图 Ctrl/Cmd+Shift+S；「AI 总结」默认未设键，可自行配置。',
+      open: '打开浏览器快捷键设置',
+    },
     diagnosticIncludeSnapshot: '诊断信息中包含页面快照',
     analytics:
       '匿名使用统计（仅功能使用次数与版本号，不含任何文档内容、地址或身份信息，详见项目主页的隐私政策）',
@@ -128,7 +133,27 @@ export const zh = {
     authBannerWeb: '通过命令行（larksnap-fetch）后台抓取本网页，需先授权访问该域名。',
     authorizing: '授权中...',
     authorize: '授权访问该域名',
-    restrictedPage: '浏览器保留页面，不支持字幕抓取与 AI 总结',
+    restrictedPage: '此页面为浏览器保留页面，扩展无法在此操作',
+    // ---- 006 侧边栏重构 ----
+    tabTools: '工具',
+    tabChat: 'AI 对话',
+    sectionContext: '当前页',
+    sectionTools: '通用工具',
+    headerSettings: '设置',
+    headerCache: '缓存库',
+    publishRow: '转发布',
+    groupWebcopy: '网页剪藏',
+    groupScreenshot: '截图',
+    groupSummary: 'AI 总结',
+    groupToggles: '页面开关',
+    lastTaskFailed: '上次后台任务失败：{msg}',
+    pageKind: {
+      feishu: '飞书',
+      youtube: 'YouTube 视频',
+      video: '视频页 · {site}',
+      generic: '网页',
+      restricted: '受限页面',
+    },
     xhsDefaultTitle: '飞书文档',
     wechatCopied: '已复制公众号格式，去公众号编辑器粘贴即可',
     themePreview: {
@@ -187,6 +212,27 @@ export const zh = {
     copyMd: '复制 Markdown',
     clipboardFailed: '剪贴板写入失败，请在结果框里手动复制',
     partial: '总结中途失败，以下为部分结果（不完整）',
+  },
+
+  chat: {
+    entry: '打开 AI 对话',
+    entrySub: '总结当前页并继续追问，流式输出、Markdown 渲染',
+    summarizeNow: '总结当前页',
+    history: '历史会话',
+    emptyHint: '点「总结当前页」把页面正文/字幕交给 AI，总结完成后可以继续追问。',
+    preparing: '正在读取页面内容…',
+    thinking: '等待模型响应…',
+    chunkProgress: '内容较长，分块总结中（{current}/{total}）…',
+    sourceChip: '已读取约 {chars} 字',
+    stopped: '已停止，内容不完整',
+    stop: '停止',
+    send: '发送',
+    placeholder: '继续追问…（Enter 发送，Shift+Enter 换行）',
+    newSession: '新对话',
+    qpKeyPoints: '提取核心要点',
+    qpOneLiner: '一句话概括',
+    qpActions: '列出行动项',
+    qpExplain: '通俗解释这篇内容',
   },
 
   webcopy: {
@@ -295,9 +341,17 @@ export const zh = {
   },
 
   menu: {
+    root: 'LarkSnap',
     pageMd: '整页转 Markdown（复制）',
     selectionMd: '选中内容转 Markdown（复制）',
     unlock: '解除复制限制（开/关）',
+    screenshot: '整页截图（PNG）',
+    summarize: 'AI 总结本页',
+    openPanel: '打开 LarkSnap 面板',
+    feishuMd: '导出为 Markdown',
+    feishuPdf: '导出为 PDF',
+    feishuHtml: '导出为 HTML',
+    feishuMore: '更多导出方式…',
   },
 
   toast: {
@@ -351,6 +405,10 @@ export const zh = {
     llmAuth: 'API Key 无效或没有权限（401/403），请到设置页检查',
     llmBadStatus: 'AI 端点返回 {status}，请检查模型名与端点配置',
     llmEmpty: 'AI 返回内容为空或格式不符（需 OpenAI 兼容接口）',
+    llmOverflow: '内容超出模型上下文长度',
+    llmAborted: '已停止生成',
+    chatSourceExpired: '页面内容读取已过期，请重新发起总结',
+    chatSessionGone: '会话不存在或已被清理，请新建会话',
   },
 
   // 导出任务的进度推送（reportProgress → 侧边栏状态栏）
@@ -396,6 +454,7 @@ export const zh = {
       offscreenNoResponse: '离屏拼接页无响应',
       offscreenFailed: '离屏拼接失败',
       captureFailed: '抓屏失败，请重新点击扩展图标后再试（{msg}）',
+      needAuth: '需要授权抓取当前网页才能截图，请在弹出的提示里点「允许」',
       rateLimited: '抓屏频率受限，多次重试仍失败，请稍后再试',
       defaultName: '网页截图',
     },

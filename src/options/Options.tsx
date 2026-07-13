@@ -165,6 +165,19 @@ export function Options() {
         </select>
       </section>
 
+      {/* 快捷键说明（006）：chrome:// 地址不能用 <a> 打开，必须 tabs.create */}
+      <section className="field">
+        <label>{t('options.shortcuts.label')}</label>
+        <p className="shortcuts-desc">{t('options.shortcuts.desc')}</p>
+        <button
+          type="button"
+          className="shortcuts-open"
+          onClick={() => void chrome.tabs.create({ url: 'chrome://extensions/shortcuts' })}
+        >
+          {t('options.shortcuts.open')}
+        </button>
+      </section>
+
       <section className="field">
         <label>{t('options.feedbackUrl')}</label>
         <input

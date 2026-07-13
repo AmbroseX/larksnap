@@ -1,18 +1,13 @@
-import type { DocInfo, Message, Response, TrackEvent } from '../shared/types';
+import type { DispatchContext, Message, Response, TrackEvent } from '../shared/types';
 import { MSG, OFFSCREEN_MSG } from '../shared/constants';
-import { ensureI18n, t, type TranslationKey } from '../shared/i18n';
+import { ensureI18n, t } from '../shared/i18n';
 import { getRuntimeState } from '../shared/storage';
-import { detectActiveDoc } from './doc-detect';
+import { detectActiveDoc, detectDocForTab, getActiveTab } from './doc-detect';
 import { getSnapshot } from './feishu-proxy';
 import { reportProgress } from './progress';
-import { exportMarkdown } from './exporters/markdown';
-import { exportSheet } from './exporters/sheet';
-import { exportPdf } from './exporters/pdf';
-import { exportHtml } from './exporters/html';
 import { exportAttachments } from './exporters/attachments';
 import { exportXhs } from './exporters/xhs';
 import { exportWechat } from './exporters/wechat';
-import { exportScreenshot } from './exporters/screenshot';
 import type { XhsRenderProgress } from './xhs/types';
 import type { ScreenshotFormat, ShotStitchProgress } from '../shared/types';
 import { cacheDoc, listCache, removeCache, getCache } from './cache-manager';
@@ -29,26 +24,33 @@ import {
   revealVideoTask,
 } from './video';
 import { track, initAnalytics } from './analytics';
+import { exportTranscript, listCaptionTracks } from './exporters/transcript';
+import { classifyPage } from '../shared/page-kind';
+import type { SummaryResult } from '../shared/types';
 import {
-  exportTranscript,
-  listCaptionTracks,
-  isYoutubeWatchUrl,
-} from './exporters/transcript';
-import { summarizePage } from './summarize';
-import type { PageKind, SummaryResult } from '../shared/types';
-import { detectDocFromUrl } from '../content/feishu-detect';
-import { getActiveTab } from './doc-detect';
-import {
-  setupWebcopy,
-  isRestrictedUrl,
-  webcopyPageMd,
-  webcopySelectionMd,
   webcopyToggleUnlock,
   webcopyEnsure,
   webcopyGetState,
   copyTabs,
 } from './webcopy';
-import type { TabCopyFormat } from '../shared/types';
+import type { ActionId, TabCopyFormat } from '../shared/types';
+// 统一动作分发层（006）：入口捕获 tabId 后全链路显式传递
+import {
+  dispatchAction,
+  requireReady,
+  blockSheetOnly,
+  trackedExport,
+  withContentTab,
+} from './actions-dispatch';
+import { setupContextMenus, registerMenus } from './context-menus';
+import { setupBadge, clearBadge, listTaskRecords } from './badge';
+// AI 对话页（007）：prepare + 流式 Port + 会话存取
+import {
+  prepareSummarize,
+  setupChatPort,
+  listChatSessions,
+  getChatSession,
+} from './summarize/chat-port';
 
 console.log('[larksnap] Service Worker 启动');
 
@@ -58,16 +60,50 @@ void ensureI18n();
 // CC ⇄ 扩展 桥接：连原生宿主、长连保活、接收远程导出任务
 startBridge();
 
-// webcopy：右键菜单注册与分发（与飞书导出平行，互不干扰）
-setupWebcopy();
+// 右键菜单：全部入口收敛在 LarkSnap 父菜单下（006 阶段1b）
+setupContextMenus();
+
+// 角标反馈：切到该 tab 即清角标（006 阶段1b）
+setupBadge();
+
+// AI 对话流式长连接（007）：侧边栏 connect 后经 Port 收 delta/done/error
+setupChatPort();
 
 // 匿名统计：安装/更新事件（可在设置页关闭）
 initAnalytics();
 
-// 点击图标弹出状态 popup（manifest 的 default_popup），侧边栏从 popup 里的按钮打开。
-// 注意：openPanelOnActionClick 是浏览器持久化的设置，旧版本设过 true，必须显式改回
-// false，否则点图标仍然开侧边栏、popup 不会显示。
-chrome.sidePanel?.setPanelBehavior?.({ openPanelOnActionClick: false }).catch(() => {});
+// 点击工具栏图标直开侧边栏（006 阶段1c）：popup 已删除，桥接状态迁入侧边栏 header。
+// openPanelOnActionClick 是浏览器持久化的设置，升级安装的老用户此前被设为 false，必须显式设回 true。
+chrome.sidePanel?.setPanelBehavior?.({ openPanelOnActionClick: true }).catch(() => {});
+
+// ==================== 键盘快捷键（006 阶段1b） ====================
+// command 名 → 动作 id；触发瞬间用事件携带的 tab，异常时才退化查一次活动页（入口层唯一允许点）
+const COMMAND_ACTION: Record<string, ActionId> = {
+  'open-panel': 'open-panel',
+  'page-md': 'page-md',
+  screenshot: 'screenshot',
+  summarize: 'summarize',
+};
+chrome.commands?.onCommand.addListener((command, tab) => {
+  const action = COMMAND_ACTION[command];
+  if (!action) return;
+  const run = (target: chrome.tabs.Tab | undefined) => {
+    if (!target?.id) return;
+    const tabId = target.id;
+    // sidePanel.open 必须留在手势的同步调用栈内（await 之后调用会被浏览器拒绝）
+    if (action === 'open-panel' || action === 'summarize') {
+      chrome.sidePanel.open({ tabId }).catch(() => {});
+      if (action === 'open-panel') return;
+    }
+    // 受限页不预先拦截：让动作自然失败并落角标+任务记录（可感知，不静默）
+    void ensureI18n().then(() =>
+      dispatchAction(action, { tabId, url: target.url || '', source: 'command' })
+    );
+  };
+  if (tab?.id != null) run(tab);
+  else void chrome.tabs.query({ active: true, currentWindow: true }).then(([t2]) => run(t2));
+});
+
 // ==================== 消息路由 ====================
 chrome.runtime.onMessage.addListener((message: Message, sender, sendResponse) => {
   handleMessage(message, sender)
@@ -90,7 +126,16 @@ async function handleMessage(
   switch (message.type) {
     case MSG.GET_STATUS: {
       const state = await getRuntimeState();
+      // 侧边栏打开即视为「用户已看到结果」：清当前 tab 的角标（006，US5）
+      const tab = await getActiveTab();
+      if (tab?.id) void clearBadge(tab.id);
       return { success: true, data: state };
+    }
+
+    case MSG.LIST_TASK_RECORDS: {
+      const tab = await getActiveTab();
+      if (!tab?.id) return { success: true, data: [] };
+      return { success: true, data: await listTaskRecords(tab.id) };
     }
 
     case MSG.GET_BRIDGE_STATUS: {
@@ -117,15 +162,21 @@ async function handleMessage(
       return { success: true, data: await hasPermissionForHost(host || '') };
     }
     case MSG.REQUEST_PERMISSION: {
-      // UI 已在用户手势中完成 chrome.permissions.request；此处仅持久化授权 pattern
+      // UI 已在用户手势中完成 chrome.permissions.request；此处持久化授权 pattern，
+      // 并重建右键菜单（permissions.onAdded 也会重建，但那时 trustedDomains 可能还没落盘）
       const { pattern } = (message.data || {}) as { pattern?: string };
-      if (pattern) await recordTrusted(pattern);
+      if (pattern) {
+        await recordTrusted(pattern);
+        void registerMenus();
+      }
       return { success: true };
     }
     case MSG.REVOKE_PERMISSION: {
       const { pattern } = (message.data || {}) as { pattern?: string };
       if (!pattern) return { success: false, error: t('bg.missingPermissionPattern') };
-      return { success: true, data: await revokePermission(pattern) };
+      const removed = await revokePermission(pattern);
+      void registerMenus();
+      return { success: true, data: removed };
     }
     case MSG.LIST_TRUSTED: {
       return { success: true, data: await listTrusted() };
@@ -133,14 +184,9 @@ async function handleMessage(
 
     // ---------- 导出动作 ----------
     case MSG.EXPORT_MARKDOWN: {
-      const doc = await detectActiveDoc();
-      const err = requireReady(doc);
-      if (err) return err;
-      // 电子表格走专门的内存抽取导出（docx 那套 client_vars 对表格是空的）
-      const isSheet = doc!.docType === 'sheets';
-      return trackedExport(isSheet ? 'sheet' : 'markdown', () =>
-        isSheet ? exportSheet(doc!) : exportMarkdown(doc!)
-      );
+      const ctx = await capturePanelCtx();
+      if (!ctx) return noActiveTab();
+      return dispatchAction('feishu-md', ctx);
     }
 
     case MSG.EXPORT_WORD: {
@@ -149,38 +195,49 @@ async function handleMessage(
     }
 
     case MSG.EXPORT_PDF: {
-      const doc = await detectActiveDoc();
-      const err = requireReady(doc);
-      return err ?? blockSheetOnly(doc!) ?? trackedExport('pdf', () => exportPdf(doc!));
+      const ctx = await capturePanelCtx();
+      if (!ctx) return noActiveTab();
+      return dispatchAction('feishu-pdf', ctx);
     }
 
     case MSG.EXPORT_HTML: {
-      const doc = await detectActiveDoc();
-      const err = requireReady(doc);
-      return err ?? blockSheetOnly(doc!) ?? trackedExport('html', () => exportHtml(doc!));
+      const ctx = await capturePanelCtx();
+      if (!ctx) return noActiveTab();
+      return dispatchAction('feishu-html', ctx);
     }
 
     case MSG.EXPORT_XHS: {
-      const doc = await detectActiveDoc();
-      const err = requireReady(doc);
-      const { themeId } = (message.data || {}) as { themeId?: string };
-      return err ?? blockSheetOnly(doc!) ?? trackedExport('xhs', () => exportXhs(doc!, themeId));
-    }
-
-    case MSG.EXPORT_WECHAT: {
-      const doc = await detectActiveDoc();
+      const ctx = await capturePanelCtx();
+      if (!ctx) return noActiveTab();
+      const doc = await detectDocForTab(ctx.tabId);
       const err = requireReady(doc);
       const { themeId } = (message.data || {}) as { themeId?: string };
       return (
-        err ?? blockSheetOnly(doc!) ?? trackedExport('wechat', () => exportWechat(doc!, themeId))
+        err ??
+        blockSheetOnly(doc!) ??
+        withContentTab(ctx.tabId, () => trackedExport('xhs', () => exportXhs(doc!, themeId)))
+      );
+    }
+
+    case MSG.EXPORT_WECHAT: {
+      const ctx = await capturePanelCtx();
+      if (!ctx) return noActiveTab();
+      const doc = await detectDocForTab(ctx.tabId);
+      const err = requireReady(doc);
+      const { themeId } = (message.data || {}) as { themeId?: string };
+      return (
+        err ??
+        blockSheetOnly(doc!) ??
+        withContentTab(ctx.tabId, () => trackedExport('wechat', () => exportWechat(doc!, themeId)))
       );
     }
 
     // ---------- 整页截图（任意网页长图，与飞书通道解耦） ----------
     case MSG.EXPORT_SCREENSHOT: {
+      const ctx = await capturePanelCtx();
+      if (!ctx) return noActiveTab();
       const { format } = (message.data || {}) as { format?: ScreenshotFormat };
-      const fmt: ScreenshotFormat = format === 'pdf' ? 'pdf' : 'png';
-      return trackedExport('screenshot', () => exportScreenshot(fmt));
+      return dispatchAction('screenshot', ctx, { format });
     }
 
     // offscreen 页逐屏拼接进度，转成统一进度推给侧边栏
@@ -212,21 +269,29 @@ async function handleMessage(
     }
 
     case MSG.EXPORT_ATTACHMENTS: {
-      const doc = await detectActiveDoc();
+      const ctx = await capturePanelCtx();
+      if (!ctx) return noActiveTab();
+      const doc = await detectDocForTab(ctx.tabId);
       const err = requireReady(doc);
       return (
         err ??
         blockSheetOnly(doc!) ??
-        trackedExport('attachments', () => exportAttachments(doc!))
+        withContentTab(ctx.tabId, () =>
+          trackedExport('attachments', () => exportAttachments(doc!))
+        )
       );
     }
 
     case MSG.CACHE_DOC: {
-      const doc = await detectActiveDoc();
+      const ctx = await capturePanelCtx();
+      if (!ctx) return noActiveTab();
+      const doc = await detectDocForTab(ctx.tabId);
       const err = requireReady(doc);
       if (err) return err;
-      const snapshot = await getSnapshot().catch(() => null);
-      return cacheDoc(doc!, snapshot);
+      return withContentTab(ctx.tabId, async () => {
+        const snapshot = await getSnapshot().catch(() => null);
+        return cacheDoc(doc!, snapshot);
+      });
     }
 
     case MSG.CACHE_LIST: {
@@ -277,20 +342,29 @@ async function handleMessage(
 
     // ---------- 网页复制（webcopy） ----------
     case MSG.WEBCOPY_PAGE_MD: {
-      return webcopyPageMd();
+      const ctx = await capturePanelCtx();
+      if (!ctx) return noActiveTab();
+      return dispatchAction('page-md', ctx);
     }
     case MSG.WEBCOPY_SELECTION_MD: {
-      return webcopySelectionMd();
+      const ctx = await capturePanelCtx();
+      if (!ctx) return noActiveTab();
+      return dispatchAction('selection-md', ctx);
     }
     case MSG.WEBCOPY_TOGGLE_UNLOCK: {
+      const ctx = await capturePanelCtx();
+      if (!ctx) return noActiveTab();
       const { enabled } = (message.data || {}) as { enabled?: boolean };
-      return webcopyToggleUnlock(!!enabled);
+      return webcopyToggleUnlock(ctx.tabId, ctx.url, !!enabled);
     }
     case MSG.WEBCOPY_ENSURE: {
-      return webcopyEnsure();
+      const ctx = await capturePanelCtx();
+      if (!ctx) return noActiveTab();
+      return webcopyEnsure(ctx.tabId, ctx.url);
     }
     case MSG.WEBCOPY_GET_STATE: {
-      return webcopyGetState();
+      const tab = await getActiveTab();
+      return webcopyGetState(tab?.id ?? null);
     }
     case MSG.COPY_TABS: {
       const { scope, format } = (message.data || {}) as {
@@ -300,17 +374,10 @@ async function handleMessage(
       return copyTabs(scope ?? 'all', format ?? 'markdown');
     }
 
-    // ---------- YouTube 字幕 + AI 总结（004） ----------
-    // 页面类型三态：feishu 走现有导出 / youtube 出字幕+总结入口 / generic 出总结入口
+    // ---------- 页面分类（006：五分类，驱动侧边栏上下文区） ----------
     case MSG.GET_PAGE_KIND: {
       const tab = await getActiveTab();
-      const url = tab?.url || '';
-      let kind: PageKind;
-      if (!url || isRestrictedUrl(url)) kind = 'restricted';
-      else if (detectDocFromUrl(url).isFeishuDoc) kind = 'feishu';
-      else if (isYoutubeWatchUrl(url)) kind = 'youtube';
-      else kind = 'generic';
-      return { success: true, data: { kind, url } };
+      return { success: true, data: classifyPage(tab?.url, tab?.title) };
     }
 
     case MSG.LIST_CAPTION_TRACKS: {
@@ -328,9 +395,16 @@ async function handleMessage(
     }
 
     case MSG.SUMMARIZE_PAGE: {
+      // 导航意图触发时侧边栏带 tabId/url（锁定触发瞬间的页面）；直接点卡片则捕获当前页
+      const { tabId, url } = (message.data || {}) as { tabId?: number; url?: string };
+      const ctx: DispatchContext | null =
+        tabId != null
+          ? { tabId, url: url || '', source: 'panel' }
+          : await capturePanelCtx();
+      if (!ctx) return noActiveTab();
       // 统计只报枚举/数值 {kind, ok, chunks, secs}，绝不含内容/URL/端点（FR-006）
       const started = Date.now();
-      const res = await summarizePage();
+      const res = await dispatchAction('summarize', ctx);
       const data = res.data as (SummaryResult & { needsAck?: boolean }) | undefined;
       if (!data?.needsAck) {
         void track({
@@ -347,6 +421,27 @@ async function handleMessage(
       return res;
     }
 
+    // ---------- AI 对话页（007） ----------
+    case MSG.SUMMARIZE_PREPARE: {
+      // 意图触发时侧边栏带 tabId/url 锁定目标页；直接点入口则捕获当前页
+      const { tabId, url } = (message.data || {}) as { tabId?: number; url?: string };
+      const ctx =
+        tabId != null
+          ? { tabId, url: url || '' }
+          : await capturePanelCtx();
+      if (!ctx) return noActiveTab();
+      return prepareSummarize({ tabId: ctx.tabId, url: ctx.url });
+    }
+
+    case MSG.CHAT_LIST_SESSIONS:
+      return listChatSessions();
+
+    case MSG.CHAT_GET_SESSION: {
+      const { id } = (message.data || {}) as { id?: string };
+      if (!id) return { success: false, error: t('bg.chatSessionGone') };
+      return getChatSession(id);
+    }
+
     // ---------- 匿名统计（UI 页面转发，SW 统一收口） ----------
     case MSG.TRACK: {
       void track(message.data as TrackEvent);
@@ -358,60 +453,15 @@ async function handleMessage(
   }
 }
 
-/**
- * 多维表格（base）走的又是另一套接口，现有任何管线都处理不了，全局挡掉。
- * 电子表格（sheets）已由 exportSheet 支持导出 Markdown/CSV，故不在此列——
- * 但 PDF/HTML/附件对表格仍不适用，由各自 handler 单独挡（见 blockSheetOnly）。
- * 详见 docs/plans/2026-07-03-sheets导出适配研究.md
- */
-const UNSUPPORTED_EXPORT_TYPES: Partial<Record<DocInfo['docType'], TranslationKey>> = {
-  base: 'bg.docTypeBase',
-};
+// requireReady / blockSheetOnly / trackedExport 已随分发层迁至 actions-dispatch.ts（006）
 
-/** 校验文档是否就绪（已识别 + 已授权 + 类型可导出），否则返回错误 Response */
-function requireReady(doc: DocInfo | null): Response | null {
-  if (!doc || !doc.isFeishuDoc) {
-    return { success: false, error: t('bg.notFeishuPage') };
-  }
-  if (doc.needsAuth) {
-    return { success: false, error: t('bg.privateNeedsAuth') };
-  }
-  const unsupported = UNSUPPORTED_EXPORT_TYPES[doc.docType];
-  if (unsupported) {
-    return {
-      success: false,
-      error: t('bg.unsupportedDocType', { type: t(unsupported) }),
-    };
-  }
-  return null;
+/** 侧边栏入口：处理消息的瞬间捕获目标标签页，此后全链路显式传递（006） */
+async function capturePanelCtx(): Promise<DispatchContext | null> {
+  const tab = await getActiveTab();
+  if (!tab?.id) return null;
+  return { tabId: tab.id, url: tab.url || '', source: 'panel' };
 }
 
-/** 执行导出并上报结果（格式、成败、耗时秒），统计失败不影响导出 */
-async function trackedExport(
-  format: string,
-  run: () => Promise<Response>
-): Promise<Response> {
-  const started = Date.now();
-  const res = await run();
-  void track({
-    name: 'export',
-    url: `/export/${format}`,
-    data: {
-      format,
-      ok: !!res.success,
-      secs: Math.round((Date.now() - started) / 1000),
-    },
-  });
-  return res;
-}
-
-/** 电子表格只支持 Markdown/CSV 导出；PDF/HTML/附件对表格不适用，单独挡 */
-function blockSheetOnly(doc: DocInfo): Response | null {
-  if (doc.docType === 'sheets') {
-    return {
-      success: false,
-      error: t('bg.sheetOnlyMarkdown'),
-    };
-  }
-  return null;
+function noActiveTab(): Response {
+  return { success: false, error: t('bg.noActiveTab') };
 }

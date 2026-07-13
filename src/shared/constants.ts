@@ -15,6 +15,19 @@ export const STORAGE_KEYS = {
   MD_CAP: 'larksnap:md-capability',
   /** 视频下载线路记忆（按站点枚举名）：Record<site, VideoRoute> */
   VIDEO_ROUTE: 'larksnap:video-route',
+  /** 后台触发动作的任务记录前缀（storage.session），完整键为 `${TASKS_PREFIX}${tabId}` */
+  TASKS_PREFIX: 'larksnap:tasks:',
+  /** 「AI 总结」导航意图（storage.session，单槽、读到即删） */
+  INTENT: 'larksnap:intent',
+  /** 侧边栏界面偏好（storage.local）：UiPrefs */
+  UI_PREFS: 'larksnap:ui-prefs',
+  /** AI 会话列表（storage.session）：ChatSession[]，按字节配额裁最旧 */
+  CHAT_SESSIONS: 'larksnap:chat:sessions',
+  /**
+   * 侧边栏上次停留页（storage.local）：'home' | 'chat'。
+   * 独立键——UI_PREFS 是整对象覆盖写，混存会互相冲掉（007 评审 P2）。
+   */
+  LAST_VIEW: 'larksnap:last-view',
 } as const;
 
 /** UI ↔ 背景 的消息类型 */
@@ -40,6 +53,8 @@ export const MSG = {
   EXPORT_DIAGNOSTIC: 'export_diagnostic',
   // 状态
   GET_STATUS: 'get_status',
+  /** 当前标签页的后台任务记录（右键/快捷键触发的结果，006）：TaskRecord[] */
+  LIST_TASK_RECORDS: 'list_task_records',
   // 桥接（CC ⇄ daemon）连接状态：popup 展示版本/连接/profile
   GET_BRIDGE_STATUS: 'get_bridge_status',
   // content → SW：读取 Cookie（HttpOnly CSRF token）
@@ -86,7 +101,17 @@ export const MSG = {
   LIST_CAPTION_TRACKS: 'list_caption_tracks',
   /** AI 总结当前页（YouTube 字幕 / 网页正文），未配置端点或未确认时返回引导态 */
   SUMMARIZE_PAGE: 'summarize_page',
+  // ---- AI 对话页与流式总结（007）----
+  /** 总结前置：配置/确认检查 + 取材缓存，data={ tabId?, url? }，响应 SummaryPrepared 或引导态 */
+  SUMMARIZE_PREPARE: 'summarize_prepare',
+  /** 会话列表（元信息，不带 messages）：ChatSessionMeta[] */
+  CHAT_LIST_SESSIONS: 'chat_list_sessions',
+  /** 取单个会话全量：data={ id }，响应 ChatSession | null */
+  CHAT_GET_SESSION: 'chat_get_session',
 } as const;
+
+/** AI 对话流式长连接的 Port 名（侧边栏 chrome.runtime.connect 用） */
+export const CHAT_PORT_NAME = 'larksnap-chat';
 
 /** SW ⇄ offscreen 页的消息类型（小红书卡片渲染，§六） */
 export const OFFSCREEN_MSG = {
