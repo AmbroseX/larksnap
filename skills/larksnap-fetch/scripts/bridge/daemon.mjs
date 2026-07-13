@@ -28,7 +28,7 @@ import {
   loadOrCreateSecret,
   verifySigHeader,
 } from './protocol.mjs';
-import { runVideoJob } from './video.mjs';
+import { runVideoJob, runVideoProbe } from './video.mjs';
 
 ensureHomeDir();
 const SECRET = loadOrCreateSecret();
@@ -281,11 +281,12 @@ attachWsServer(httpServer, {
       }
       // 扩展发起的视频下载任务（v3 反向链路）：daemon 自己起 yt-dlp，进度主动推回本连接。
       // 只接受已 hello 的连接；参数校验/白名单在 video.mjs 里收口（这条 WS 无签名，不能信任内容）。
-      if (msg.type === 'video-job') {
+      if (msg.type === 'video-job' || msg.type === 'video-probe') {
         if (!conn._contextId || (conn._proto ?? 0) < 3 || msg.id == null) return;
         const vid = String(msg.id);
-        log('video job', vid, conn._contextId);
-        void runVideoJob({ ...msg, id: vid }, (obj) => conn.send(JSON.stringify(obj)), log, () => {
+        const run = msg.type === 'video-job' ? runVideoJob : runVideoProbe;
+        log(msg.type, vid, conn._contextId);
+        void run({ ...msg, id: vid }, (obj) => conn.send(JSON.stringify(obj)), log, () => {
           conn._videoJobs?.delete(vid);
           armIdle();
         }).then((handle) => {

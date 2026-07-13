@@ -17,7 +17,7 @@ import fs from 'node:fs';
 import crypto from 'node:crypto';
 import { EventEmitter } from 'node:events';
 
-export const DAEMON_VERSION = '1.4.0'; // 1.3.0: 编辑任务；1.4.0: 扩展发起的视频下载任务（daemon 本机跑 yt-dlp）
+export const DAEMON_VERSION = '1.5.1'; // 1.5.0: 代理线路 + 任务日志落盘 + 文件名带分辨率/帧率；1.5.1: YouTube nsig 解题启用 JS 运行时（--js-runtimes）
 export const PROTOCOL_VERSION = 3; // WS 握手用：hello/welcome 双向携带，不匹配时提示更新。v2: kind='edit'；v3: 扩展可主动发 video-job，daemon 主动推进度
 export const HOST = '127.0.0.1';
 export const PORT = Number(process.env.LARKSNAP_PORT || 19925);
