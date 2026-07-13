@@ -1,6 +1,6 @@
 import html2canvas from 'html2canvas';
 import { OFFSCREEN_MSG } from '../shared/constants';
-import type { Response } from '../shared/types';
+import type { Response, ShotStitchRequest, ShotStitchResult } from '../shared/types';
 import type {
   XhsRenderProgress,
   XhsRenderRequest,
@@ -9,25 +9,43 @@ import type {
 import { getTheme } from './themes';
 import { paginate } from './paginate';
 import { addPageNumber, SCALE } from './render';
+import { stitch } from './stitch';
 
 /**
- * 离屏渲染页入口（§六）：SW 没有 DOM，html2canvas 在这里跑。
- * 只认 XHS_RENDER 一种消息，其余（PROGRESS 推送等广播）一律放行给别的监听者。
+ * 离屏页入口（§六）：SW 没有 DOM，html2canvas（小红书卡片）与整页截图拼接都在这里跑。
+ * 只认自己的消息类型，其余（PROGRESS 推送等广播）一律放行给别的监听者。
  */
 
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
-  if (!message || message.type !== OFFSCREEN_MSG.XHS_RENDER) return false;
-  render(message.data as XhsRenderRequest)
-    .then((pngs) =>
-      sendResponse({ success: true, data: { pngs } } satisfies Response<XhsRenderResult>)
-    )
-    .catch((err: unknown) =>
-      sendResponse({
-        success: false,
-        error: err instanceof Error ? err.message : String(err),
-      } satisfies Response)
-    );
-  return true; // 异步响应
+  if (message?.type === OFFSCREEN_MSG.XHS_RENDER) {
+    render(message.data as XhsRenderRequest)
+      .then((pngs) =>
+        sendResponse({ success: true, data: { pngs } } satisfies Response<XhsRenderResult>)
+      )
+      .catch((err: unknown) =>
+        sendResponse({
+          success: false,
+          error: err instanceof Error ? err.message : String(err),
+        } satisfies Response)
+      );
+    return true; // 异步响应
+  }
+
+  if (message?.type === OFFSCREEN_MSG.SHOT_STITCH) {
+    stitch(message.data as ShotStitchRequest)
+      .then((data) =>
+        sendResponse({ success: true, data } satisfies Response<ShotStitchResult>)
+      )
+      .catch((err: unknown) =>
+        sendResponse({
+          success: false,
+          error: err instanceof Error ? err.message : String(err),
+        } satisfies Response)
+      );
+    return true; // 异步响应
+  }
+
+  return false;
 });
 
 async function render(req: XhsRenderRequest): Promise<string[]> {
