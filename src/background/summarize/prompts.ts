@@ -45,6 +45,19 @@ export function chatSystemPrompt(targetLang: string): ChatMessage {
   };
 }
 
+/**
+ * 纯聊天 system（无页面取材的会话用）：不预设"基于给定内容"，
+ * 否则模型会对普通问题回答"内容里没有"。
+ */
+export function plainChatSystemPrompt(targetLang: string): ChatMessage {
+  return {
+    role: 'system',
+    content:
+      'You are a helpful assistant. Answer the user directly and concisely. ' +
+      `Always reply in ${targetLang} using Markdown.`,
+  };
+}
+
 /** 会话里存的是裸全文（kind='source'），发送前包上总结指令 */
 export function wrapSourceContent(content: string): string {
   return `${SUMMARY_INSTRUCTION}CONTENT:\n${content}`;

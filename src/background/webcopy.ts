@@ -9,6 +9,8 @@ import { CONTENT_MSG } from '../shared/constants';
 import { t } from '../shared/i18n';
 import { findAdapter, type AdapterExtractResult, type SiteAdapter } from './webcopy-adapters';
 import { track } from './analytics';
+import { downloadBase64, safeName } from './download';
+import { bytesToBase64 } from './media-util';
 
 /** webcopy 动作统计（只报动作枚举，不含页面信息） */
 function trackWebcopy(action: 'page' | 'selection' | 'unlock' | 'tabs'): void {
@@ -53,6 +55,38 @@ export async function webcopyPageMdInPage(tabId: number, url: string): Promise<R
   return sendToTab(tabId, CONTENT_MSG.WEBCOPY_PAGE_TO_MD, { writeClipboard: true });
 }
 
+/** 整页转 MD 并下载 .md（右键入口）：转换管线同复制版，产物由 SW 落盘到下载目录 */
+export async function webcopyPageMdDownloadInPage(tabId: number, url: string): Promise<Response> {
+  trackWebcopy('page');
+  let markdown = '';
+  let title = '';
+  const adapter = findAdapter(url);
+  if (adapter) {
+    const result = await runAdapter(tabId, adapter);
+    if (result?.abort) {
+      // 确定性失败（登录墙/风控/不存在）：提示原因，不退通用管线
+      return { success: false, error: result.note || t('bg.pageUnfetchable') };
+    }
+    if (result) {
+      markdown = result.markdown;
+      title = result.title;
+    }
+    // 适配器不适用此页：继续走通用管线
+  }
+  if (!markdown) {
+    await injectWebcopy(tabId);
+    const res = await sendToTab<WebCopyMdResult>(tabId, CONTENT_MSG.WEBCOPY_PAGE_TO_MD, {});
+    if (!res.success || !res.data) return res;
+    markdown = res.data.markdown;
+    title = res.data.title;
+  }
+  const name = `${safeName(title || t('webcopy.defaultFilename'))}.md`;
+  const bytes = new TextEncoder().encode(markdown);
+  await downloadBase64(bytesToBase64(bytes.buffer as ArrayBuffer), 'text/markdown', name);
+  await toastInMainWorld(tabId, t('toast.mdDownloaded', { name })).catch(() => {});
+  return { success: true };
+}
+
 /** 选区转 MD（页内反馈版） */
 export async function webcopySelectionMdInPage(tabId: number): Promise<Response> {
   trackWebcopy('selection');
@@ -74,8 +108,8 @@ export async function injectWebcopy(tabId: number): Promise<void> {
   });
 }
 
-/** 在页面上弹一条提示（适配器 abort 时告知用户失败原因） */
-async function toastInMainWorld(tabId: number, text: string): Promise<void> {
+/** 在页面上弹一条提示（适配器 abort / 右键入口失败时告知用户原因；无权限注入失败由调用方兜底） */
+export async function toastInMainWorld(tabId: number, text: string): Promise<void> {
   await chrome.scripting.executeScript({
     target: { tabId },
     world: 'MAIN',

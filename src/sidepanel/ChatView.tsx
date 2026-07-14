@@ -4,6 +4,7 @@ import type {
   ChatServerMsg,
   ChatSession,
   ChatSessionMeta,
+  SelectionPrompt,
   SummaryNeedsAck,
   SummaryPrepared,
 } from '../shared/types';
@@ -28,6 +29,30 @@ type Phase = 'idle' | 'preparing' | 'streaming';
 /** SidePanel 消费导航意图后传入；ts 用于区分两次相同页面的触发 */
 export interface ChatAutoStart extends TargetRef {
   ts: number;
+  /** 右键「问 AI」带来的选中文字：走纯聊天通路，不抓页面（008） */
+  selectionText?: string;
+  selPrompt?: SelectionPrompt;
+}
+
+/** 推荐指令 → 发送给模型的指令文案 key（选中文字通路共用） */
+const SEL_INS = {
+  summarize: 'chat.selInsSummarize',
+  translate: 'chat.selInsTranslate',
+  explain: 'chat.selInsExplain',
+  rewrite: 'chat.selInsRewrite',
+} as const;
+
+/** 选区推荐按钮：[按钮文案 key, 指令文案 key] */
+const SEL_ACTIONS = [
+  ['chat.selSummarize', 'chat.selInsSummarize'],
+  ['chat.selTranslate', 'chat.selInsTranslate'],
+  ['chat.selExplain', 'chat.selInsExplain'],
+  ['chat.selRewrite', 'chat.selInsRewrite'],
+] as const;
+
+/** 选中文字 + 指令 → 一条用户消息（内容即所见，模型与气泡看到同一份） */
+function composeSelectionMessage(instruction: string, selection: string): string {
+  return `${instruction}\n\n${selection}`;
 }
 
 export function ChatView({ autoStart }: { autoStart: ChatAutoStart | null }) {
@@ -44,6 +69,10 @@ export function ChatView({ autoStart }: { autoStart: ChatAutoStart | null }) {
   const [ack, setAck] = useState<{ origin: string; target?: TargetRef } | null>(null);
   const [input, setInput] = useState('');
   const [copiedIdx, setCopiedIdx] = useState<number | null>(null);
+  /** 纯聊天开场时先行渲染的首条用户消息（accepted 回来后由会话真身接管） */
+  const [pendingFirst, setPendingFirst] = useState<string | null>(null);
+  /** 当前页选中文字（activeTab 读取；读不到即 null，绝不弹授权） */
+  const [selection, setSelection] = useState<string | null>(null);
 
   const portRef = useRef<chrome.runtime.Port | null>(null);
   const reqIdRef = useRef(0);
@@ -63,6 +92,7 @@ export function ChatView({ autoStart }: { autoStart: ChatAutoStart | null }) {
     switch (msg.type) {
       case 'accepted':
         setSession(msg.session);
+        setPendingFirst(null);
         break;
       case 'progress':
         setChunkProgress({ current: msg.current, total: msg.total });
@@ -86,6 +116,9 @@ export function ChatView({ autoStart }: { autoStart: ChatAutoStart | null }) {
         setStreamText('');
         setChunkProgress(null);
         setPhase('idle');
+        // 纯聊天开场失败：首条消息还没进会话，捞回输入框，用户不用重打
+        if (!session && pendingFirst) setInput((v) => v || pendingFirst);
+        setPendingFirst(null);
         if (msg.kind !== 'aborted' && msg.message) setError(msg.message);
         break;
     }
@@ -168,11 +201,38 @@ export function ChatView({ autoStart }: { autoStart: ChatAutoStart | null }) {
     [getPort]
   );
 
-  /** 发送一条追问（输入框与推荐 chips 共用） */
+  /** 纯聊天开场（008）：不取页面、零授权，首条就是普通用户消息 */
+  const startChat = useCallback(
+    (raw: string) => {
+      const text = raw.trim();
+      if (!text || phaseRef.current !== 'idle') return;
+      setError(null);
+      setSession(null);
+      setPendingFirst(text);
+      reqIdRef.current += 1;
+      const requestId = reqIdRef.current;
+      currentReqRef.current = requestId;
+      setStreamText('');
+      setChunkProgress(null);
+      setPhase('streaming');
+      getPort().postMessage({
+        type: 'start-chat',
+        requestId,
+        text,
+      } satisfies ChatClientMsg);
+    },
+    [getPort]
+  );
+
+  /** 发送一条消息（输入框与推荐 chips 共用）：无会话时开纯聊天，有会话则追问 */
   const sendText = useCallback(
     (raw: string) => {
       const text = raw.trim();
-      if (!text || !session || phaseRef.current !== 'idle') return;
+      if (!text || phaseRef.current !== 'idle') return;
+      if (!session) {
+        startChat(text);
+        return;
+      }
       setError(null);
       // 渲染态先行追加；SW 侧以 sessionId 从存储取真身再追加，终态落盘
       setSession((s) =>
@@ -190,7 +250,7 @@ export function ChatView({ autoStart }: { autoStart: ChatAutoStart | null }) {
         text,
       } satisfies ChatClientMsg);
     },
-    [session, getPort]
+    [session, getPort, startChat]
   );
 
   const send = useCallback(() => {
@@ -225,12 +285,41 @@ export function ChatView({ autoStart }: { autoStart: ChatAutoStart | null }) {
     await startSummary(target);
   }, [ack, startSummary]);
 
-  // 导航意图（右键/快捷键「AI 总结」）：SidePanel 消费后传入，按 ts 去重
+  // 导航意图（右键/快捷键）：SidePanel 消费后传入，按 ts 去重。
+  // 带选中文字的走纯聊天通路（零授权）；否则是「AI 总结」抓整页
   useEffect(() => {
     if (!autoStart || autoStart.ts === consumedTsRef.current) return;
     consumedTsRef.current = autoStart.ts;
-    void startSummary({ tabId: autoStart.tabId, url: autoStart.url });
-  }, [autoStart, startSummary]);
+    const sel = autoStart.selectionText?.trim();
+    if (sel) {
+      const ins = t(SEL_INS[autoStart.selPrompt ?? 'summarize']);
+      startChat(composeSelectionMessage(ins, sel));
+    } else {
+      void startSummary({ tabId: autoStart.tabId, url: autoStart.url });
+    }
+  }, [autoStart, startSummary, startChat]);
+
+  // 当前页选区探测（008 主通路）：面板可见/获得焦点时读一次，读不到就当没选中。
+  // 只用 activeTab，绝不触发授权弹窗；不可用时右键菜单「问 AI」是兜底
+  useEffect(() => {
+    let alive = true;
+    const fetchSelection = async () => {
+      const res = await sendToBackground<{ text: string }>(MSG.GET_SELECTION);
+      if (alive && res.success) setSelection(res.data?.text?.trim() || null);
+    };
+    void fetchSelection();
+    const onFocus = () => void fetchSelection();
+    const onVisible = () => {
+      if (!document.hidden) void fetchSelection();
+    };
+    window.addEventListener('focus', onFocus);
+    document.addEventListener('visibilitychange', onVisible);
+    return () => {
+      alive = false;
+      window.removeEventListener('focus', onFocus);
+      document.removeEventListener('visibilitychange', onVisible);
+    };
+  }, []);
 
   const loadSession = useCallback(async (id: string) => {
     if (phaseRef.current !== 'idle') return;
@@ -290,8 +379,12 @@ export function ChatView({ autoStart }: { autoStart: ChatAutoStart | null }) {
           <button
             className="chat-ghost-btn"
             disabled={busy || configured == null}
-            onClick={() => void startSummary()}
-            title={t('chat.summarizeNow')}
+            onClick={() => {
+              // 回到空状态：可直接打字纯聊天，也可点「总结当前页」
+              setSession(null);
+              setError(null);
+            }}
+            title={t('chat.newSession')}
           >
             ＋ {t('chat.newSession')}
           </button>
@@ -333,7 +426,7 @@ export function ChatView({ autoStart }: { autoStart: ChatAutoStart | null }) {
         </div>
       ) : (
         <div className="chat-msgs" ref={scrollRef}>
-          {!session && !busy && (
+          {!session && !busy && !pendingFirst && (
             <div className="chat-empty">
               <div className="chat-empty-icon">✨</div>
               <p>{t('chat.emptyHint')}</p>
@@ -344,10 +437,14 @@ export function ChatView({ autoStart }: { autoStart: ChatAutoStart | null }) {
               >
                 {t('chat.summarizeNow')}
               </button>
+              <p className="chat-empty-sub">{t('chat.summarizeNote')}</p>
             </div>
           )}
 
           {session?.note && <div className="chat-note">⚠️ {session.note}</div>}
+
+          {/* 纯聊天开场：会话真身（accepted）回来前先渲染首条用户消息 */}
+          {!session && pendingFirst && <div className="chat-bubble user">{pendingFirst}</div>}
 
           {session?.messages.map((m, i) =>
             m.kind === 'source' ? (
@@ -397,7 +494,35 @@ export function ChatView({ autoStart }: { autoStart: ChatAutoStart | null }) {
       )}
 
       <div className="chat-composer">
-        {session && phase === 'idle' && !ack && (
+        {/* 选中文本 chip + 推荐按钮（008）：点按钮 = 选中文字 + 指令走纯聊天，零授权 */}
+        {selection && phase === 'idle' && !ack && (
+          <div className="chat-sel-zone">
+            <div className="chat-sel-chip" title={selection}>
+              <span className="chat-sel-label">✂️ {t('chat.selChip', { chars: selection.length })}</span>
+              <span className="chat-sel-preview">{selection}</span>
+              <button
+                type="button"
+                className="chat-sel-clear"
+                title={t('common.cancel')}
+                onClick={() => setSelection(null)}
+              >
+                ✕
+              </button>
+            </div>
+            <div className="chat-quick-row">
+              {SEL_ACTIONS.map(([labelKey, insKey]) => (
+                <button
+                  key={labelKey}
+                  className="chat-chip"
+                  onClick={() => sendText(composeSelectionMessage(t(insKey), selection))}
+                >
+                  {t(labelKey)}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+        {session && !selection && phase === 'idle' && !ack && (
           <div className="chat-quick-row">
             {quickPrompts.map((k) => (
               <button key={k} className="chat-chip" onClick={() => sendText(t(`chat.${k}`))}>
@@ -411,8 +536,8 @@ export function ChatView({ autoStart }: { autoStart: ChatAutoStart | null }) {
             ref={taRef}
             className="chat-input"
             value={input}
-            placeholder={t('chat.placeholder')}
-            disabled={!session || busy}
+            placeholder={session ? t('chat.placeholder') : t('chat.placeholderNew')}
+            disabled={busy}
             rows={1}
             onChange={(e) => {
               setInput(e.target.value);
@@ -439,7 +564,7 @@ export function ChatView({ autoStart }: { autoStart: ChatAutoStart | null }) {
               type="button"
               className="chat-round-btn"
               title={t('chat.send')}
-              disabled={!session || busy || !input.trim()}
+              disabled={busy || !input.trim()}
               onClick={send}
             >
               ➤

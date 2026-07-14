@@ -42,7 +42,7 @@ import {
   trackedExport,
   withContentTab,
 } from './actions-dispatch';
-import { setupContextMenus, registerMenus } from './context-menus';
+import { setupContextMenus } from './context-menus';
 import { setupBadge, clearBadge, listTaskRecords } from './badge';
 // AI 对话页（007）：prepare + 流式 Port + 会话存取
 import {
@@ -162,20 +162,16 @@ async function handleMessage(
       return { success: true, data: await hasPermissionForHost(host || '') };
     }
     case MSG.REQUEST_PERMISSION: {
-      // UI 已在用户手势中完成 chrome.permissions.request；此处持久化授权 pattern，
-      // 并重建右键菜单（permissions.onAdded 也会重建，但那时 trustedDomains 可能还没落盘）
+      // UI 已在用户手势中完成 chrome.permissions.request；此处只持久化授权 pattern。
+      // 右键菜单的飞书组可见性按当前页识别动态维护，与授权列表无关。
       const { pattern } = (message.data || {}) as { pattern?: string };
-      if (pattern) {
-        await recordTrusted(pattern);
-        void registerMenus();
-      }
+      if (pattern) await recordTrusted(pattern);
       return { success: true };
     }
     case MSG.REVOKE_PERMISSION: {
       const { pattern } = (message.data || {}) as { pattern?: string };
       if (!pattern) return { success: false, error: t('bg.missingPermissionPattern') };
       const removed = await revokePermission(pattern);
-      void registerMenus();
       return { success: true, data: removed };
     }
     case MSG.LIST_TRUSTED: {
@@ -448,6 +444,24 @@ async function handleMessage(
       const { id } = (message.data || {}) as { id?: string };
       if (!id) return { success: false, error: t('bg.chatSessionGone') };
       return getChatSession(id);
+    }
+
+    case MSG.GET_SELECTION: {
+      // 读当前活动页的选中文字：只用 activeTab，没授权/受限页读不到就当没选中，
+      // 绝不弹授权框（008 的零授权承诺；右键菜单 selectionText 是兜底通路）
+      const tab = await getActiveTab();
+      if (!tab?.id) return { success: true, data: { text: '' } };
+      try {
+        const [res] = await chrome.scripting.executeScript({
+          target: { tabId: tab.id },
+          func: () => window.getSelection()?.toString() ?? '',
+        });
+        const text = String(res?.result ?? '').trim();
+        // 超长选区截断：纯聊天通路不走 refine 切块，避免一次塞爆上下文
+        return { success: true, data: { text: text.slice(0, 8000) } };
+      } catch {
+        return { success: true, data: { text: '' } };
+      }
     }
 
     // ---------- 匿名统计（UI 页面转发，SW 统一收口） ----------

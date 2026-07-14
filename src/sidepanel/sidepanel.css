@@ -1415,6 +1415,12 @@ body {
   border-radius: 999px;
 }
 
+.chat-empty-sub {
+  font-size: 11px;
+  color: var(--text-sub);
+  opacity: 0.75;
+}
+
 .chat-note {
   font-size: 12px;
   color: #b45309;
@@ -1537,6 +1543,50 @@ body {
 /* 底部编排区：推荐 chips 行 + 输入壳 */
 .chat-composer {
   padding-top: 6px;
+}
+
+/* 选中文本区（008）：chip（单行预览 + 清除）+ 推荐按钮行 */
+.chat-sel-zone {
+  padding-bottom: 2px;
+}
+
+.chat-sel-chip {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--text-sub);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 5px 8px;
+  margin-bottom: 6px;
+}
+
+.chat-sel-label {
+  flex-shrink: 0;
+  color: var(--accent);
+}
+
+.chat-sel-preview {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chat-sel-clear {
+  flex-shrink: 0;
+  border: none;
+  background: none;
+  color: var(--text-sub);
+  cursor: pointer;
+  font-size: 12px;
+  padding: 0 2px;
+}
+
+.chat-sel-clear:hover {
+  color: var(--accent);
 }
 
 .chat-quick-row {
@@ -1742,4 +1792,27 @@ body {
   border: 0;
   border-top: 1px solid var(--border);
   margin: 10px 0;
+}
+
+/* 截图组：截取时长上限输入（无限滚动页控制截多久，留空自动） */
+.wc-shot-time {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 8px;
+  font-size: 12px;
+  color: var(--text-2, #667085);
+}
+.wc-shot-time input {
+  width: 64px;
+  padding: 3px 6px;
+  border: 1px solid var(--border, #e4e7ec);
+  border-radius: 6px;
+  font-size: 12px;
+  color: inherit;
+  background: #fff;
+}
+.wc-shot-time input:focus {
+  outline: none;
+  border-color: var(--accent, #3370ff);
 }

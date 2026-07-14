@@ -108,6 +108,8 @@ export const MSG = {
   CHAT_LIST_SESSIONS: 'chat_list_sessions',
   /** 取单个会话全量：data={ id }，响应 ChatSession | null */
   CHAT_GET_SESSION: 'chat_get_session',
+  /** 读当前活动标签页的选中文字（activeTab，读不到返回空串）：{ text } */
+  GET_SELECTION: 'get_selection',
 } as const;
 
 /** AI 对话流式长连接的 Port 名（侧边栏 chrome.runtime.connect 用） */

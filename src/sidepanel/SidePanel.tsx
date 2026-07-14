@@ -32,14 +32,15 @@ import { ChatView, type ChatAutoStart } from './ChatView';
 type View = 'home' | 'chat' | 'cache' | 'xhsPreview';
 
 /**
- * 读取并消费「AI 总结」导航意图（006，右键/快捷键入口写入）：
+ * 读取并消费导航意图（006「AI 总结」/ 008「问 AI 选中文字」，右键/快捷键入口写入）：
  * 单槽、读到即删（一次性）、超 30s 视为过期丢弃、形状不合法丢弃。
  */
 async function consumeIntent(): Promise<NavigationIntent | null> {
   try {
     const got = await chrome.storage.session.get(STORAGE_KEYS.INTENT);
     const intent = got[STORAGE_KEYS.INTENT] as NavigationIntent | undefined;
-    if (!intent || intent.target !== 'summary') return null;
+    if (!intent || (intent.target !== 'summary' && intent.target !== 'chat-selection'))
+      return null;
     await chrome.storage.session.remove(STORAGE_KEYS.INTENT);
     if (typeof intent.tabId !== 'number' || typeof intent.url !== 'string') return null;
     if (Date.now() - (intent.createdAt || 0) > 30_000) return null;
@@ -83,7 +84,14 @@ export function SidePanel() {
       void consumeIntent().then((intent) => {
         if (!intent) return;
         landed = true;
-        setChatIntent({ tabId: intent.tabId, url: intent.url, ts: Date.now() });
+        setChatIntent({
+          tabId: intent.tabId,
+          url: intent.url,
+          ts: Date.now(),
+          ...(intent.target === 'chat-selection'
+            ? { selectionText: intent.selectionText, selPrompt: intent.selPrompt }
+            : null),
+        });
         setView('chat');
       });
     chrome.storage.local.get(STORAGE_KEYS.LAST_VIEW).then((got) => {
@@ -185,9 +193,21 @@ export function SidePanel() {
     const pattern = permissionPattern(host);
     setAuthing(true);
     try {
-      const granted = await chrome.permissions.request({ origins: [pattern] });
+      // request 异常（如手势失效、pattern 不合法）不吞：原因直接显示在状态栏
+      let granted = false;
+      try {
+        granted = await chrome.permissions.request({ origins: [pattern] });
+      } catch (e) {
+        setStatus(e instanceof Error ? e.message : String(e));
+        return;
+      }
       if (granted) {
-        await sendToBackground(MSG.REQUEST_PERMISSION, { pattern });
+        // 只有飞书文档页的授权才记入「已信任域名」——那份列表同时决定右键菜单
+        // 飞书导出组的显示范围，普通网页的域名混进去会让「导出为 Markdown/PDF」
+        // 出现在非飞书页面上（点了必失败）。普通网页只授权、不记录。
+        if (doc.isFeishuDoc) {
+          await sendToBackground(MSG.REQUEST_PERMISSION, { pattern });
+        }
         await refreshDoc();
         setStatus(
           doc.isFeishuDoc ? t('sidepanel.authorizedFeishu') : t('sidepanel.authorizedWeb')
@@ -346,7 +366,9 @@ export function SidePanel() {
         </div>
       </header>
 
-      {needsAuth && (
+      {/* 授权横幅只服务首页（工具）视图：给桥接后台抓取一个授权入口。
+          对话页是纯聊天，用不到全文抓取，必须跟随标签页一起隐藏，否则会误导成「聊天也要授权」 */}
+      {view !== 'chat' && needsAuth && (
         <div className="auth-banner">
           <p>{t('sidepanel.authBannerFeishu')}</p>
           <button className="auth-btn" onClick={handleAuthorize} disabled={authing}>
@@ -354,7 +376,7 @@ export function SidePanel() {
           </button>
         </div>
       )}
-      {webNeedsAuth && (
+      {view !== 'chat' && webNeedsAuth && (
         <div className="auth-banner">
           <p>{t('sidepanel.authBannerWeb')}</p>
           <button className="auth-btn" onClick={handleAuthorize} disabled={authing}>

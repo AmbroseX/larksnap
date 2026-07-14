@@ -16,7 +16,13 @@ import { t } from '../../shared/i18n';
 import { track } from '../analytics';
 import { collectSource, type SourceMaterial, type SummarizeTarget } from './index';
 import { chatComplete, chatCompleteStream, LlmError, type ChatMessage } from './llm';
-import { buildRefineMessages, buildSummaryMessages, chatSystemPrompt, wrapSourceContent } from './prompts';
+import {
+  buildRefineMessages,
+  buildSummaryMessages,
+  chatSystemPrompt,
+  plainChatSystemPrompt,
+  wrapSourceContent,
+} from './prompts';
 import { estimateTokens, PROMPT_RESERVE, refineChunkChars, TOKEN_BUDGET, trimHistoryToBudget } from './tokens';
 import { splitText } from './splitter';
 
@@ -237,6 +243,25 @@ async function handleClientMsg(
     return;
   }
 
+  if (msg.type === 'start-chat') {
+    // 纯聊天开场：不取页面、不需要任何 host 授权（008）
+    const text = msg.text.trim();
+    if (!text) return;
+    const now = Date.now();
+    const session: ChatSession = {
+      id: crypto.randomUUID(),
+      title: chatTitle(text),
+      sourceKind: 'chat',
+      messages: [{ role: 'user', content: text }],
+      createdAt: now,
+      updatedAt: now,
+    };
+    post(port, { type: 'accepted', requestId: msg.requestId, session });
+    // isFirst=false：纯聊天没有整页取材，不需要 refine 切块与首轮统计
+    await runGeneration(port, state, msg.requestId, session, ai, false);
+    return;
+  }
+
   // ask：追问既有会话
   const got = await getChatSession(msg.sessionId);
   const session = got.data;
@@ -253,6 +278,12 @@ async function handleClientMsg(
   if (!text) return;
   session.messages.push({ role: 'user', content: text });
   await runGeneration(port, state, msg.requestId, session, ai, false);
+}
+
+/** 纯聊天会话标题：取首条消息第一行截断 */
+function chatTitle(text: string): string {
+  const line = text.split('\n', 1)[0].trim();
+  return line.length > 40 ? `${line.slice(0, 40)}…` : line;
 }
 
 /** 存储消息 → 发送消息：source 条包上总结指令，其余原样 */
@@ -310,13 +341,16 @@ async function runGeneration(
   try {
     let full: string;
     const budget = TOKEN_BUDGET - PROMPT_RESERVE;
-    const sourceText = session.messages[0]?.kind === 'source' ? session.messages[0].content : '';
+    const hasSource = session.messages[0]?.kind === 'source';
+    const sourceText = hasSource ? session.messages[0].content : '';
 
     if (isFirst && estimateTokens(sourceText) > budget) {
       full = await refineStream(ai, sourceText, requestId, port, onDelta, ctrl.signal);
     } else {
       const trimmed = trimHistoryToBudget(session.messages, budget);
-      const send = [chatSystemPrompt(ai.targetLang), ...trimmed.map(toWire)];
+      // 有页面取材的会话用"基于给定内容"提示；纯聊天用通用提示，避免答非所问
+      const system = hasSource ? chatSystemPrompt(ai.targetLang) : plainChatSystemPrompt(ai.targetLang);
+      const send = [system, ...trimmed.map(toWire)];
       try {
         full = await chatCompleteStream(ai, send, onDelta, ctrl.signal);
       } catch (err) {

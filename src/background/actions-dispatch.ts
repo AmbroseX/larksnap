@@ -5,6 +5,7 @@ import type {
   NavigationIntent,
   Response,
   ScreenshotFormat,
+  SelectionPrompt,
 } from '../shared/types';
 import { STORAGE_KEYS } from '../shared/constants';
 import { t, type TranslationKey } from '../shared/i18n';
@@ -19,7 +20,9 @@ import { exportHtml } from './exporters/html';
 import { exportScreenshot } from './exporters/screenshot';
 import { summarizePage } from './summarize';
 import {
+  toastInMainWorld,
   webcopyPageMd,
+  webcopyPageMdDownloadInPage,
   webcopyPageMdInPage,
   webcopySelectionMd,
   webcopySelectionMdInPage,
@@ -41,6 +44,10 @@ export interface ActionPayload {
   maxSeconds?: number;
   /** 每屏滚动后的最少停顿（秒，侧边栏输入；重动画/背景图页手动加大）。缺省纯自适应 */
   stepSeconds?: number;
+  /** ask-ai-selection：右键时的选中文字（onClicked 动态注入） */
+  selectionText?: string;
+  /** ask-ai-selection：推荐指令 */
+  selPrompt?: SelectionPrompt;
 }
 
 export interface ActionRoute {
@@ -57,7 +64,13 @@ export async function dispatchAction(
   const route = resolveAction(id);
   // 后台入口（右键/快捷键）：包一层任务记录 + 角标反馈；侧边栏入口沿用状态栏反馈
   if (ctx.source !== 'panel' && route.feedback === 'badge') {
-    return runTracked(id, ctx, () => route.run(ctx, payload));
+    const res = await runTracked(id, ctx, () => route.run(ctx, payload));
+    // 失败原因页内 toast 直接可见（角标"!"太隐蔽，用户会以为动作没生效）。
+    // 右键/快捷键自带 activeTab，注入基本必成；个别注入不了的页面静默放弃即可。
+    if (!res.success && res.error) {
+      void toastInMainWorld(ctx.tabId, res.error).catch(() => {});
+    }
+    return res;
   }
   return route.run(ctx, payload);
 }
@@ -75,6 +88,11 @@ const ROUTES: Record<ActionId, ActionRoute> = {
       ctx.source === 'panel'
         ? webcopyPageMd(ctx.tabId, ctx.url)
         : webcopyPageMdInPage(ctx.tabId, ctx.url),
+  },
+  'page-md-download': {
+    feedback: 'badge',
+    // 右键入口的下载版（侧边栏有自己的下载按钮，不走这里）：产物由 SW 直接落盘
+    run: (ctx) => webcopyPageMdDownloadInPage(ctx.tabId, ctx.url),
   },
   'selection-md': {
     feedback: 'badge',
@@ -103,6 +121,11 @@ const ROUTES: Record<ActionId, ActionRoute> = {
         ? summarizePage({ tabId: ctx.tabId, url: ctx.url })
         : sendSummarizeIntent(ctx),
   },
+  'ask-ai-selection': {
+    // 结果由侧边栏对话页承载：只写导航意图 + 开面板，纯聊天通路零授权
+    feedback: 'none',
+    run: (ctx, payload) => sendChatSelectionIntent(ctx, payload),
+  },
   unlock: {
     // 页内 toast 已是反馈；侧边栏的显式开关（带 enabled 参数）走原消息通道
     feedback: 'none',
@@ -130,6 +153,30 @@ async function sendSummarizeIntent(ctx: DispatchContext): Promise<Response> {
     autoStart: true,
     tabId: ctx.tabId,
     url: ctx.url,
+    createdAt: Date.now(),
+  };
+  await chrome.storage.session.set({ [STORAGE_KEYS.INTENT]: intent });
+  await chrome.sidePanel.open({ tabId: ctx.tabId });
+  return { success: true };
+}
+
+/**
+ * 「问 AI 选中文字」后台入口（008）：同 sendSummarizeIntent 的意图接力方式，
+ * 但目标是对话页的纯聊天通路——选中文字随意图带过去，全程不抓页面、零授权。
+ */
+async function sendChatSelectionIntent(
+  ctx: DispatchContext,
+  payload?: ActionPayload
+): Promise<Response> {
+  const text = (payload?.selectionText || '').trim();
+  if (!text) return { success: false, error: t('bg.noSelection') };
+  const intent: NavigationIntent = {
+    target: 'chat-selection',
+    autoStart: true,
+    tabId: ctx.tabId,
+    url: ctx.url,
+    selectionText: text.slice(0, 8000),
+    selPrompt: payload?.selPrompt ?? 'summarize',
     createdAt: Date.now(),
   };
   await chrome.storage.session.set({ [STORAGE_KEYS.INTENT]: intent });

@@ -462,11 +462,12 @@ export interface ChatMsg {
 /** 一个 AI 会话。存 storage.session，按字节配额裁最旧（chat-port 落盘时执行） */
 export interface ChatSession {
   id: string;
-  /** 取页面标题 */
+  /** 总结会话取页面标题；纯聊天会话取首条消息截断 */
   title: string;
-  target: { tabId: number; url: string };
-  /** 取材来源（统计与展示用枚举，不含 URL） */
-  sourceKind: 'youtube' | 'page';
+  /** 总结会话的取材目标页；纯聊天会话没有（不碰页面） */
+  target?: { tabId: number; url: string };
+  /** 取材来源（统计与展示用枚举，不含 URL）；chat = 纯聊天，无页面取材 */
+  sourceKind: 'youtube' | 'page' | 'chat';
   /** 取材降级提示（如「无字幕，用标题+简介总结」） */
   note?: string;
   messages: ChatMsg[];
@@ -488,13 +489,15 @@ export interface SummaryPrepared {
 export interface ChatSessionMeta {
   id: string;
   title: string;
-  sourceKind: 'youtube' | 'page';
+  sourceKind: 'youtube' | 'page' | 'chat';
   updatedAt: number;
 }
 
 /** 对话 Port：UI → SW。requestId 由 UI 每次生成自增分配 */
 export type ChatClientMsg =
   | { type: 'start-summary'; requestId: number; sourceId: string }
+  /** 纯聊天开场：不取页面、不需要任何 host 授权，首条就是普通用户消息 */
+  | { type: 'start-chat'; requestId: number; text: string }
   | { type: 'ask'; requestId: number; sessionId: string; text: string }
   | { type: 'stop'; requestId: number };
 
@@ -511,9 +514,11 @@ export type ChatServerMsg =
 /** 统一动作枚举：右键菜单项、快捷键 command、侧边栏入口都收敛到它 */
 export type ActionId =
   | 'page-md'
+  | 'page-md-download'
   | 'selection-md'
   | 'screenshot'
   | 'summarize'
+  | 'ask-ai-selection'
   | 'unlock'
   | 'open-panel'
   | 'feishu-md'
@@ -543,12 +548,23 @@ export interface TaskRecord {
   endedAt?: number;
 }
 
-/** 右键/快捷键触发「AI 总结」时传给侧边栏的一次性导航意图（读到即删） */
+/** 选中文字的推荐指令（右键菜单与对话页推荐按钮共用的枚举） */
+export type SelectionPrompt = 'summarize' | 'translate' | 'explain' | 'rewrite';
+
+/**
+ * 右键/快捷键触发时传给侧边栏的一次性导航意图（读到即删）。
+ *   summary：AI 总结当前页（抓整页，可能需要授权）
+ *   chat-selection：问 AI 选中文字（纯聊天通路，零授权）
+ */
 export interface NavigationIntent {
-  target: 'summary';
+  target: 'summary' | 'chat-selection';
   autoStart: boolean;
   tabId: number;
   url: string;
+  /** target='chat-selection'：右键时的选中文字（info.selectionText） */
+  selectionText?: string;
+  /** target='chat-selection'：推荐指令 */
+  selPrompt?: SelectionPrompt;
   /** 写入时间：超过 30s 未被消费视为过期丢弃 */
   createdAt: number;
 }

@@ -29,7 +29,9 @@ vi.mock('./exporters/screenshot', () => ({
 }));
 vi.mock('./summarize', () => ({ summarizePage: vi.fn(async () => ({ success: true })) }));
 vi.mock('./webcopy', () => ({
+  toastInMainWorld: vi.fn(async () => {}),
   webcopyPageMd: vi.fn(async () => ({ success: true })),
+  webcopyPageMdDownloadInPage: vi.fn(async () => ({ success: true })),
   webcopyPageMdInPage: vi.fn(async () => ({ success: true })),
   webcopySelectionMd: vi.fn(async () => ({ success: true })),
   webcopySelectionMdInPage: vi.fn(async () => ({ success: true })),
@@ -47,9 +49,11 @@ import { webcopyPageMd, webcopyPageMdInPage } from './webcopy';
 
 const ALL_ACTIONS: ActionId[] = [
   'page-md',
+  'page-md-download',
   'selection-md',
   'screenshot',
   'summarize',
+  'ask-ai-selection',
   'unlock',
   'open-panel',
   'feishu-md',
@@ -174,6 +178,31 @@ describe('按触发来源路由', () => {
       url: CTX_MENU.url,
     });
     expect(sidePanelOpen).toHaveBeenCalledWith({ tabId: 42 });
+  });
+
+  it('ask-ai-selection（menu）：写 chat-selection 意图并开侧边栏，纯聊天通路（008）', async () => {
+    await dispatchAction('ask-ai-selection', CTX_MENU, {
+      selectionText: '  选中的一段文字  ',
+      selPrompt: 'translate',
+    });
+    expect(sessionSet).toHaveBeenCalledTimes(1);
+    const written = sessionSet.mock.calls[0][0];
+    expect(written[STORAGE_KEYS.INTENT]).toMatchObject({
+      target: 'chat-selection',
+      autoStart: true,
+      tabId: 42,
+      url: CTX_MENU.url,
+      selectionText: '选中的一段文字',
+      selPrompt: 'translate',
+    });
+    expect(sidePanelOpen).toHaveBeenCalledWith({ tabId: 42 });
+  });
+
+  it('ask-ai-selection：空选区直接失败，不写意图不开面板', async () => {
+    const res = await dispatchAction('ask-ai-selection', CTX_MENU, { selectionText: '   ' });
+    expect(res.success).toBe(false);
+    expect(sessionSet).not.toHaveBeenCalled();
+    expect(sidePanelOpen).not.toHaveBeenCalled();
   });
 });
 
