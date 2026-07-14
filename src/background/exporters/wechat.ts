@@ -3,8 +3,14 @@ import { t } from '../../shared/i18n';
 import { reportProgress } from '../progress';
 import { resolveObjToken, fetchClientVars } from '../feishu-api';
 import { buildBlockTree } from '../convert/adapter';
-import { collectImageAssets, renderWechatHtml, getWechatTheme } from '../convert/wechat-html';
+import {
+  collectImageAssets,
+  collectWhiteboardIds,
+  renderWechatHtml,
+  getWechatTheme,
+} from '../convert/wechat-html';
 import { downloadImageDataUrls } from '../image-map';
+import { extractWhiteboards } from './whiteboard';
 
 /** 公众号导出的产物：HTML 字符串回传侧边栏，由侧边栏写剪贴板（手势在那边） */
 export interface WechatResult {
@@ -49,6 +55,23 @@ export async function exportWechat(
           10 + Math.round((d / total) * 80)
         )
       );
+    }
+
+    // 画板：注入页面抓 canvas 转 PNG，按 blockId 并进 imageMap（渲染器按 block.id 取）
+    const wbIds = collectWhiteboardIds(tree);
+    if (wbIds.length) {
+      await reportProgress(
+        'wechat',
+        'running',
+        t('progress.markdown.readingWhiteboards', { n: wbIds.length }),
+        92
+      );
+      try {
+        const wbMap = await extractWhiteboards(wbIds.map((blockId) => ({ blockId })));
+        imageMap = { ...imageMap, ...wbMap };
+      } catch (e) {
+        console.warn('[larksnap] 画板抓取失败，降级为占位:', e);
+      }
     }
 
     await reportProgress('wechat', 'running', t('progress.wechat.generating'), 95);

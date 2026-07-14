@@ -501,6 +501,9 @@ export const zh = {
       readingSheets: '正在读取 {n} 个内嵌表格...',
       sheetFallback: '内嵌表格未能读取，已降级为链接',
       viewEmbeddedSheet: '查看内嵌表格',
+      readingWhiteboards: '正在抓取 {n} 个画板...',
+      whiteboardAlt: '画板',
+      whiteboardFallback: '画板未能抓取（请把画板滚动到可见区域后重试，或在飞书里另存为图片手动插入）',
       allImagesFailed:
         '已导出，但 {n} 张图片全部下载失败（多为未授权该域名/图片域，请重新授权后重试），已降级为在线链接',
       doneWithPartialImages: 'Markdown 导出完成（图片 {ok}/{total}，部分失败已降级为在线链接）',

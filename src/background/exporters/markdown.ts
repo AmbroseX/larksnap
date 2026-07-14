@@ -17,6 +17,7 @@ import {
 } from '../capability';
 import { blocksToMarkdown } from '../convert/markdown';
 import { extractEmbeddedSheets, sheetToMdTable } from './sheet';
+import { extractWhiteboards } from './whiteboard';
 import { createZipDataUrl, type ZipFile } from '../zip';
 import { downloadBase64, downloadDataUrl, safeName } from '../download';
 import {
@@ -113,7 +114,7 @@ async function runDecodeMd(
     const data = (cv.data ?? {}) as Record<string, unknown>;
 
     await reportProgress('markdown', 'running', t('progress.markdown.converting'));
-    const { markdown, images, sheetBlocks } = blocksToMarkdown(
+    const { markdown, images, sheetBlocks, whiteboards } = blocksToMarkdown(
       data,
       resolved.objToken
     );
@@ -146,18 +147,48 @@ async function runDecodeMd(
       }
     }
 
+    // 画板块：注入页面抓 canvas 转 PNG dataURL，替换占位符。
+    // 同 sheet 一样必须在 imageMode 分叉之前做，两支才都替换得到。
+    let wbMap: Record<string, string | null> = {};
+    if (whiteboards.length > 0) {
+      await reportProgress(
+        'markdown',
+        'running',
+        t('progress.markdown.readingWhiteboards', { n: whiteboards.length })
+      );
+      try {
+        wbMap = await extractWhiteboards(whiteboards);
+      } catch (e) {
+        // 整体失败（标签页没了等）：全部走占位，不让整篇导出失败
+        console.warn('[larksnap] 画板抓取失败，降级为占位:', e);
+      }
+    }
+
     const files: ZipFile[] = [];
 
-    if (config.imageMode === 'link' || images.length === 0) {
-      // link 模式 / 无图：占位替换为在线 URL，产出纯 .md
+    if (
+      config.imageMode === 'link' ||
+      (images.length === 0 && whiteboards.length === 0)
+    ) {
+      // link 模式 / 无任何素材：占位替换为在线 URL，产出纯 .md
       finalMd = replaceWithOnline(finalMd, images, doc);
+      // 画板没有在线 URL，只能把 PNG 以 data URI 内联进 .md（抓不到则写占位说明）
+      for (const ref of whiteboards) {
+        const dataUrl = wbMap[ref.blockId];
+        const repl = dataUrl
+          ? `![${t('progress.markdown.whiteboardAlt')}](${dataUrl})`
+          : `<!-- ${t('progress.markdown.whiteboardFallback')} -->`;
+        finalMd = replaceAll(finalMd, `feishu-whiteboard-block://${ref.blockId}`, repl);
+      }
       await downloadDataUrl(
         'data:text/markdown;charset=utf-8,' + encodeURIComponent(finalMd),
         `${safeName(title)}.md`
       );
     } else {
       // download 模式：并发下载图片（≤3 + 退避），替换为相对路径，打包 zip
-      await reportProgress('markdown', 'running', t('progress.common.downloadingImages', { n: images.length }));
+      if (images.length > 0) {
+        await reportProgress('markdown', 'running', t('progress.common.downloadingImages', { n: images.length }));
+      }
       const assets = await mapWithConcurrency(
         images,
         3,
@@ -196,6 +227,26 @@ async function runDecodeMd(
             finalMd,
             `feishu-asset://${img.token}`,
             onlineMediaUrl(doc.host, img.token, img.mountToken, img.width, img.height)
+          );
+        }
+      }
+      // 画板 PNG 落盘到 images/，占位符换成相对路径（抓不到则写占位说明）
+      for (const ref of whiteboards) {
+        const dataUrl = wbMap[ref.blockId];
+        const bytes = dataUrl ? dataUrlToBytes(dataUrl) : null;
+        if (bytes) {
+          const path = `images/whiteboard-${ref.blockId}.png`;
+          files.push({ path, content: bytes });
+          finalMd = replaceAll(
+            finalMd,
+            `feishu-whiteboard-block://${ref.blockId}`,
+            `![${t('progress.markdown.whiteboardAlt')}](${path})`
+          );
+        } else {
+          finalMd = replaceAll(
+            finalMd,
+            `feishu-whiteboard-block://${ref.blockId}`,
+            `<!-- ${t('progress.markdown.whiteboardFallback')} -->`
           );
         }
       }
@@ -248,6 +299,17 @@ function replaceWithOnline(
 
 function replaceAll(s: string, find: string, repl: string): string {
   return s.split(find).join(repl);
+}
+
+/** `data:image/png;base64,XXXX` → 字节数组；不是 base64 dataURL 则返回 null */
+function dataUrlToBytes(dataUrl: string): Uint8Array | null {
+  const comma = dataUrl.indexOf(',');
+  if (comma < 0 || !/;base64/i.test(dataUrl.slice(0, comma))) return null;
+  try {
+    return base64ToBytes(dataUrl.slice(comma + 1));
+  } catch {
+    return null;
+  }
 }
 
 function errMsg(err: unknown): string {

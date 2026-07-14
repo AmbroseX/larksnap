@@ -3,6 +3,7 @@ import type {
   EmbeddedSheetRef,
   MarkdownResult,
   MediaAsset,
+  WhiteboardRef,
 } from '../../shared/types';
 import { renderInline, plainText } from './apool';
 import { buildBlockTree, type BlockTree } from './adapter';
@@ -19,6 +20,7 @@ interface Ctx {
   tree: BlockTree;
   images: MediaAsset[];
   sheetBlocks: EmbeddedSheetRef[];
+  whiteboards: WhiteboardRef[];
   seen: Set<string>;
 }
 
@@ -27,7 +29,13 @@ export function blocksToMarkdown(
   objToken: string
 ): MarkdownResult {
   const tree = buildBlockTree(clientVarsData, objToken);
-  const ctx: Ctx = { tree, images: [], sheetBlocks: [], seen: new Set() };
+  const ctx: Ctx = {
+    tree,
+    images: [],
+    sheetBlocks: [],
+    whiteboards: [],
+    seen: new Set(),
+  };
   const parts: string[] = [];
   for (const id of tree.order) {
     const md = renderBlock(id, 0, ctx);
@@ -35,7 +43,12 @@ export function blocksToMarkdown(
   }
   const markdown =
     parts.join('\n\n').replace(/\n{3,}/g, '\n\n').trim() + '\n';
-  return { markdown, images: ctx.images, sheetBlocks: ctx.sheetBlocks };
+  return {
+    markdown,
+    images: ctx.images,
+    sheetBlocks: ctx.sheetBlocks,
+    whiteboards: ctx.whiteboards,
+  };
 }
 
 function renderBlock(id: string, depth: number, ctx: Ctx): string {
@@ -99,6 +112,9 @@ function renderBlock(id: string, depth: number, ctx: Ctx): string {
 
     case type === 'sheet':
       return renderSheetBlock(block, ctx);
+
+    case type === 'whiteboard' || type === 'board':
+      return renderWhiteboardBlock(block, ctx);
 
     default: {
       // 未知块：保留后代文本，否则占位
@@ -186,6 +202,15 @@ function renderSheetBlock(block: Block, ctx: Ctx): string {
     subId: token.slice(cut + 1),
   });
   return `feishu-sheet-block://${block.id}`;
+}
+
+/**
+ * 画板块：client_vars 里没有图，内容是页面 WASM 引擎画在 canvas 上的。这里只收集
+ * 块引用 + 写占位符，真正的抓图由 exporter 注入页面完成（同 sheet 块的思路）。
+ */
+function renderWhiteboardBlock(block: Block, ctx: Ctx): string {
+  ctx.whiteboards.push({ blockId: block.id });
+  return `feishu-whiteboard-block://${block.id}`;
 }
 
 function renderCallout(block: Block, depth: number, ctx: Ctx): string {

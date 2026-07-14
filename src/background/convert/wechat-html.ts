@@ -30,6 +30,15 @@ interface Ctx {
 const BODY = 'font-size:15px;line-height:1.5;color:rgba(0,0,0,0.9)';
 const MONO = 'Consolas,Monaco,monospace';
 
+/** 收集树里全部画板块的 id（导出时注入页面抓 canvas，结果按 blockId 塞进 imageMap） */
+export function collectWhiteboardIds(tree: BlockTree): string[] {
+  const out: string[] = [];
+  for (const block of Object.values(tree.map)) {
+    if (block.type === 'whiteboard' || block.type === 'board') out.push(block.id);
+  }
+  return out;
+}
+
 /** 收集树里全部图片块的素材引用（下载去重由 image-map 做） */
 export function collectImageAssets(tree: BlockTree): MediaAsset[] {
   const out: MediaAsset[] = [];
@@ -180,7 +189,7 @@ function renderBlock(id: string, depth: number, ctx: Ctx): string {
       return placeholder('内嵌表格：请到原文档查看');
 
     case type.includes('whiteboard') || type === 'board':
-      return placeholder('画板暂不支持，请在飞书导出图片后手动插入');
+      return renderWhiteboard(block, ctx);
 
     default: {
       // 未知块：保留自身文本与后代，实在没内容才占位
@@ -266,6 +275,20 @@ function renderImage(block: Block, ctx: Ctx): string {
   const align = Number(img.align) === 1 ? 'left' : Number(img.align) === 3 ? 'right' : 'center';
   return (
     `<section${mark('image', block.id)} style="text-align:${align};margin:20px 0">` +
+    `<img src="${url}" data-larksnap-content="" style="max-width:100%;border-radius:8px" data-width="100%">` +
+    '</section>'
+  );
+}
+
+/**
+ * 画板块：内容是页面 canvas 抓来的 PNG dataURL（导出时按 blockId 存进 imageMap）。
+ * 和图片一样必须内联 dataURL——外链会被公众号编辑器丢掉；抓不到画占位。
+ */
+function renderWhiteboard(block: Block, ctx: Ctx): string {
+  const url = ctx.imageMap[block.id];
+  if (!url) return placeholder('画板未能抓取，请把画板滚动到可见区域后重试，或在飞书里另存为图片手动插入');
+  return (
+    `<section${mark('whiteboard', block.id)} style="text-align:center;margin:20px 0">` +
     `<img src="${url}" data-larksnap-content="" style="max-width:100%;border-radius:8px" data-width="100%">` +
     '</section>'
   );

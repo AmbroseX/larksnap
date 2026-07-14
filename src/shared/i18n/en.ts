@@ -523,6 +523,10 @@ export const en: Dict = {
       readingSheets: 'Reading {n} embedded sheets...',
       sheetFallback: 'Embedded sheet could not be read; downgraded to a link',
       viewEmbeddedSheet: 'View embedded sheet',
+      readingWhiteboards: 'Capturing {n} whiteboards...',
+      whiteboardAlt: 'Whiteboard',
+      whiteboardFallback:
+        'Whiteboard could not be captured (scroll it into view and retry, or export it as an image in Feishu and insert manually)',
       allImagesFailed:
         'Exported, but all {n} images failed to download (usually the domain/image domain is not authorized; re-authorize and retry). Downgraded to online links.',
       doneWithPartialImages:

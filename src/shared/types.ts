@@ -269,12 +269,23 @@ export interface EmbeddedSheetRef {
   subId: string;
 }
 
-/** 转换器输出：Markdown 正文（含 feishu-asset:// / feishu-sheet-block:// 占位）+ 待处理素材 */
+/**
+ * docx 画板（whiteboard）块引用。client_vars 里画板没有任何图片，内容由页面
+ * WASM 引擎实时画在 <canvas> 上，所以只能注入页面抓 canvas 转 PNG（同 sheet 块思路）。
+ */
+export interface WhiteboardRef {
+  /** 画板块自己的 id（dox…），DOM 里 data-record-id 用它定位那块 canvas */
+  blockId: string;
+}
+
+/** 转换器输出：Markdown 正文（含 feishu-asset:// / feishu-sheet-block:// / feishu-whiteboard-block:// 占位）+ 待处理素材 */
 export interface MarkdownResult {
   markdown: string;
   images: MediaAsset[];
   /** 内嵌 sheet 块引用，exporter 取数后替换占位符 */
   sheetBlocks: EmbeddedSheetRef[];
+  /** 画板块引用，exporter 抓 canvas 转图后替换占位符 */
+  whiteboards: WhiteboardRef[];
 }
 
 // ==================== 视频下载（扩展 → daemon 反向任务） ====================
