@@ -198,17 +198,6 @@ export function Options() {
         </label>
       </section>
 
-      <section className="field checkbox">
-        <label>
-          <input
-            type="checkbox"
-            checked={config.analyticsEnabled}
-            onChange={(e) => update('analyticsEnabled', e.target.checked)}
-          />
-          {t('options.analytics')}
-        </label>
-      </section>
-
       <h2>{t('options.webcopyTitle')}</h2>
 
       <section className="field checkbox">
@@ -432,6 +421,22 @@ export function Options() {
           </ul>
         )}
       </section>
+
+      {/* 隐私与统计：设置页最底部的折叠区，默认收起。一次点击即可展开、真实可关，
+          标题诚实——只是收纳得低调些，不做多步阻挠的暗黑模式 */}
+      <details className="privacy-section">
+        <summary>{t('options.privacyTitle')}</summary>
+        <section className="field checkbox">
+          <label>
+            <input
+              type="checkbox"
+              checked={config.analyticsEnabled}
+              onChange={(e) => update('analyticsEnabled', e.target.checked)}
+            />
+            {t('options.analytics')}
+          </label>
+        </section>
+      </details>
     </div>
   );
 }

@@ -159,7 +159,9 @@ export type TrackEventName =
   | 'bridge'
   | 'edit'
   | 'video'
-  | 'summarize';
+  | 'summarize'
+  // 每日心跳：同一设备一天只报一次，某天的 active 事件总数≈当日活跃设备数
+  | 'active';
 
 /**
  * 一次统计事件。隐私红线：data 只允许枚举串 / 布尔 / 整数，

@@ -28,6 +28,10 @@ export const STORAGE_KEYS = {
    * 独立键——UI_PREFS 是整对象覆盖写，混存会互相冲掉（007 评审 P2）。
    */
   LAST_VIEW: 'larksnap:last-view',
+  /** 匿名设备 ID（storage.local）：首装生成的随机 UUID，只用来在统计里去重/算留存，不含任何身份信息 */
+  DEVICE_ID: 'larksnap:device-id',
+  /** 上次上报「日活」的日期（storage.local，YYYY-MM-DD）：同一天只报一次 active */
+  LAST_ACTIVE: 'larksnap:last-active',
 } as const;
 
 /** UI ↔ 背景 的消息类型 */
@@ -174,6 +178,67 @@ export const VIDEO_SITES: ReadonlyArray<{ site: string; hosts: string[] }> = [
   { site: 'youtube', hosts: ['youtube.com', 'youtu.be'] },
   { site: 'douyin', hosts: ['douyin.com'] },
   { site: 'tiktok', hosts: ['tiktok.com'] },
+];
+
+/**
+ * 剪藏站点白名单：只用来把「用户剪了哪类网站」归成有限枚举上报（命中报 site 名，
+ * 其余一律报 'other'）。隐私红线：这是「预先定死的有限枚举」，不是真实域名清单——
+ * 拿不到任意浏览历史，也不挂设备 ID，只知道「知乎类被剪了 N 次」，不知道是谁。
+ * 想扩充热门站，往这里加一行即可（host 用主域，子域自动命中）。
+ */
+export const CLIP_SITES: ReadonlyArray<{ site: string; hosts: string[] }> = [
+  // 中文内容站
+  { site: 'zhihu', hosts: ['zhihu.com', 'zhuanlan.zhihu.com'] },
+  { site: 'weixin', hosts: ['mp.weixin.qq.com'] },
+  { site: 'juejin', hosts: ['juejin.cn'] },
+  { site: 'csdn', hosts: ['csdn.net', 'blog.csdn.net'] },
+  { site: 'jianshu', hosts: ['jianshu.com'] },
+  { site: 'xiaohongshu', hosts: ['xiaohongshu.com', 'xhslink.com'] },
+  { site: 'weibo', hosts: ['weibo.com', 'weibo.cn'] },
+  { site: 'douban', hosts: ['douban.com'] },
+  { site: 'toutiao', hosts: ['toutiao.com'] },
+  { site: '36kr', hosts: ['36kr.com'] },
+  { site: 'sspai', hosts: ['sspai.com'] },
+  { site: 'cnblogs', hosts: ['cnblogs.com'] },
+  { site: 'segmentfault', hosts: ['segmentfault.com'] },
+  { site: 'gitee', hosts: ['gitee.com'] },
+  { site: 'baidu', hosts: ['baijiahao.baidu.com', 'baike.baidu.com', 'zhidao.baidu.com'] },
+  { site: 'bilibili', hosts: ['bilibili.com'] },
+  { site: 'yuque', hosts: ['yuque.com'] }, // 语雀
+  { site: 'v2ex', hosts: ['v2ex.com'] },
+  { site: 'ithome', hosts: ['ithome.com'] }, // IT之家
+  { site: 'infoq', hosts: ['infoq.cn'] },
+  { site: 'aliyun', hosts: ['developer.aliyun.com'] }, // 阿里云开发者社区
+  { site: 'tencent-cloud', hosts: ['cloud.tencent.com'] }, // 腾讯云开发者
+  { site: 'smzdm', hosts: ['smzdm.com'] }, // 什么值得买
+  { site: 'hupu', hosts: ['hupu.com'] }, // 虎扑
+  { site: 'weread', hosts: ['weread.qq.com'] }, // 微信读书
+  { site: 'jike', hosts: ['okjike.com', 'm.okjike.com'] }, // 即刻
+  { site: 'netease', hosts: ['163.com'] }, // 网易（新闻/号）
+  // 国际内容站
+  { site: 'github', hosts: ['github.com'] },
+  { site: 'medium', hosts: ['medium.com'] },
+  { site: 'stackoverflow', hosts: ['stackoverflow.com', 'stackexchange.com'] },
+  { site: 'wikipedia', hosts: ['wikipedia.org'] },
+  { site: 'reddit', hosts: ['reddit.com'] },
+  { site: 'x', hosts: ['x.com', 'twitter.com'] },
+  { site: 'substack', hosts: ['substack.com'] },
+  { site: 'notion', hosts: ['notion.so', 'notion.site'] },
+  { site: 'devto', hosts: ['dev.to'] },
+  { site: 'hackernews', hosts: ['news.ycombinator.com'] },
+  { site: 'arxiv', hosts: ['arxiv.org'] },
+  { site: 'linkedin', hosts: ['linkedin.com'] },
+  { site: 'quora', hosts: ['quora.com'] },
+  { site: 'youtube', hosts: ['youtube.com', 'youtu.be'] },
+  { site: 'gitlab', hosts: ['gitlab.com'] },
+  { site: 'threads', hosts: ['threads.net', 'threads.com'] },
+  { site: 'bluesky', hosts: ['bsky.app'] },
+  { site: 'theverge', hosts: ['theverge.com'] },
+  { site: 'techcrunch', hosts: ['techcrunch.com'] },
+  // AI 时代热门
+  { site: 'huggingface', hosts: ['huggingface.co'] },
+  { site: 'paperswithcode', hosts: ['paperswithcode.com'] },
+  { site: 'producthunt', hosts: ['producthunt.com'] },
 ];
 
 /** 匿名统计（Umami 自建实例）。上报内容见 src/background/analytics.ts 白名单 */

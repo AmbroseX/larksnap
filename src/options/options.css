@@ -122,3 +122,35 @@ body {
   border-color: #3370ff;
   color: #3370ff;
 }
+
+/* 隐私与统计折叠区：默认收起，summary 排版对齐其它区块标题，低调但可见可点 */
+.privacy-section {
+  margin-top: 24px;
+  border-top: 1px solid #e5e7eb;
+  padding-top: 12px;
+}
+
+.privacy-section > summary {
+  cursor: pointer;
+  font-size: 15px;
+  font-weight: 600;
+  color: #6b7280;
+  list-style: none;
+  user-select: none;
+}
+
+.privacy-section > summary::before {
+  content: '▸';
+  display: inline-block;
+  margin-right: 6px;
+  font-size: 12px;
+  color: #9ca3af;
+}
+
+.privacy-section[open] > summary::before {
+  content: '▾';
+}
+
+.privacy-section > summary::-webkit-details-marker {
+  display: none;
+}

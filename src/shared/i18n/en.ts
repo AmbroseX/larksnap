@@ -28,6 +28,7 @@ export const en: Dict = {
       open: 'Open browser shortcut settings',
     },
     diagnosticIncludeSnapshot: 'Include page snapshot in diagnostics',
+    privacyTitle: 'Privacy & Statistics',
     analytics:
       'Anonymous usage statistics (feature usage counts and version only — no document content, URLs, or identity; see the privacy policy on the project homepage)',
     webcopyTitle: 'Web Copy',

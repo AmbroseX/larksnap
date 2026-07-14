@@ -29,6 +29,7 @@ export const zh = {
       open: '打开浏览器快捷键设置',
     },
     diagnosticIncludeSnapshot: '诊断信息中包含页面快照',
+    privacyTitle: '隐私与统计',
     analytics:
       '匿名使用统计（仅功能使用次数与版本号，不含任何文档内容、地址或身份信息，详见项目主页的隐私政策）',
     webcopyTitle: '网页复制',
