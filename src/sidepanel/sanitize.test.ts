@@ -1,8 +1,27 @@
-// @vitest-environment jsdom
 import { describe, expect, it } from 'vitest';
 import { sanitizeHtml } from './sanitize';
 
-describe('sanitizeHtml 恶意载荷测试集', () => {
+/**
+ * sanitize 依赖真实 DOM（DOMParser 的实体解码/结构归一是防绕过的关键，不能用假实现）。
+ * jsdom 是可选 devDependency：装了就注入 DOM 全局跑完整载荷集，没装整组 skip。
+ * 启用：npm i -D jsdom
+ */
+let hasDom = typeof DOMParser !== 'undefined';
+if (!hasDom) {
+  try {
+    // @ts-ignore -- jsdom 为可选 devDependency，未安装时没有类型声明（装没装都不能报错）
+    const { JSDOM } = await import('jsdom');
+    const g = globalThis as Record<string, unknown>;
+    const win = new JSDOM('').window;
+    g.DOMParser = win.DOMParser;
+    g.Node = win.Node;
+    hasDom = true;
+  } catch {
+    // jsdom 未安装：跳过本测试集
+  }
+}
+
+describe.skipIf(!hasDom)('sanitizeHtml 恶意载荷测试集', () => {
   it('script/style/iframe 连同子树整体丢弃', () => {
     expect(sanitizeHtml('<p>a</p><script>alert(1)</script>')).toBe('<p>a</p>');
     expect(sanitizeHtml('<style>*{display:none}</style><p>b</p>')).toBe('<p>b</p>');
