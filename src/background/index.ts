@@ -236,8 +236,16 @@ async function handleMessage(
     case MSG.EXPORT_SCREENSHOT: {
       const ctx = await capturePanelCtx();
       if (!ctx) return noActiveTab();
-      const { format } = (message.data || {}) as { format?: ScreenshotFormat };
-      return dispatchAction('screenshot', ctx, { format });
+      const { format, maxSeconds, stepSeconds } = (message.data || {}) as {
+        format?: ScreenshotFormat;
+        maxSeconds?: number;
+        stepSeconds?: number;
+      };
+      return dispatchAction('screenshot', ctx, {
+        format,
+        maxSeconds: typeof maxSeconds === 'number' ? maxSeconds : undefined,
+        stepSeconds: typeof stepSeconds === 'number' ? stepSeconds : undefined,
+      });
     }
 
     // offscreen 页逐屏拼接进度，转成统一进度推给侧边栏

@@ -16,11 +16,24 @@ import { withOffscreen } from '../offscreen';
 import { downloadDataUrl, safeName } from '../download';
 import { captureFullPage } from '../screenshot/capture';
 
+/** 截图节奏参数（侧边栏输入，均可缺省）：
+ *  maxSeconds = 总时长上限（无限滚动页控制截多久，缺省内置兜底 2 分钟）；
+ *  stepSeconds = 每屏最少停顿（重动画/背景图页手动加大，缺省纯自适应等待） */
+export interface ShotTiming {
+  maxSeconds?: number;
+  stepSeconds?: number;
+}
+
 /** tabId 由调用方在触发瞬间捕获并显式传入（006：禁止在此重查活动页） */
-export async function exportScreenshot(format: ScreenshotFormat, tabId: number): Promise<Response> {
+export async function exportScreenshot(
+  format: ScreenshotFormat,
+  tabId: number,
+  timing?: ShotTiming
+): Promise<Response> {
   await reportProgress('screenshot', 'running', t('progress.screenshot.preparing'));
-  // 缺主机权限时回给侧边栏做手势内授权重试用（catch 里要用，故提前拿）
-  let originPattern = '';
+  // 缺权限时回给侧边栏做手势内授权重试用。抓屏只认 activeTab 或 <all_urls>
+  // 全站权限（站点级授权无效），所以重试要申请的 pattern 固定是 <all_urls>。
+  let isWebPage = false;
   try {
     const tab = await chrome.tabs.get(tabId).catch(() => null);
     if (!tab?.id) throw new Error(t('progress.screenshot.noTab'));
@@ -29,11 +42,24 @@ export async function exportScreenshot(format: ScreenshotFormat, tabId: number):
     if (!/^https?:\/\//i.test(url)) {
       throw new Error(t('progress.screenshot.unsupportedPage'));
     }
-    originPattern = `*://${new URL(url).hostname}/*`;
+    isWebPage = true;
 
     // 逐屏抓取（capture 内部 finally 已保证页面现场恢复）
-    const cap = await captureFullPage(tab, (n) =>
-      reportProgress('screenshot', 'running', t('progress.screenshot.capturing', { n }))
+    const maxSeconds = timing?.maxSeconds;
+    const stepSeconds = timing?.stepSeconds;
+    const cap = await captureFullPage(
+      tab,
+      (n) => reportProgress('screenshot', 'running', t('progress.screenshot.capturing', { n })),
+      {
+        maxTotalMs:
+          typeof maxSeconds === 'number' && maxSeconds > 0
+            ? Math.min(600, Math.max(5, maxSeconds)) * 1000
+            : undefined,
+        stepWaitMs:
+          typeof stepSeconds === 'number' && stepSeconds > 0
+            ? Math.min(10, stepSeconds) * 1000
+            : undefined,
+      }
     );
     if (!cap.shots.length) throw new Error(t('progress.screenshot.nothingCaptured'));
 
@@ -52,19 +78,21 @@ export async function exportScreenshot(format: ScreenshotFormat, tabId: number):
 
     const msg = result.truncated
       ? t('progress.screenshot.savedTruncated', { n: cap.shots.length })
-      : t('progress.screenshot.saved');
+      : cap.capped
+        ? t('progress.screenshot.savedCapped', { n: cap.shots.length })
+        : t('progress.screenshot.saved');
     await reportProgress('screenshot', 'success', msg, 100);
     return { success: true, data: { truncated: !!result.truncated } };
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
-    // captureVisibleTab 缺 activeTab/主机权限：侧边栏点按钮的手势不给网页页授 activeTab，
-    // 走 needsPermission 让侧边栏在同一手势里 permissions.request 后重试（同 webcopy 辅路径）。
-    if (originPattern && /all_urls|activeTab/i.test(msg)) {
+    // captureVisibleTab 缺 activeTab/全站权限（也覆盖注入被拒的 Cannot access）：
+    // 走 needsPermission 让侧边栏在同一手势里 permissions.request(<all_urls>) 后重试。
+    if (isWebPage && /all_urls|activeTab|cannot access/i.test(msg)) {
       await reportProgress('screenshot', 'error', t('progress.screenshot.needAuth'));
       return {
         success: false,
         error: t('progress.screenshot.needAuth'),
-        data: { needsPermission: true, originPattern },
+        data: { needsPermission: true, originPattern: '<all_urls>' },
       };
     }
     await reportProgress('screenshot', 'error', t('progress.screenshot.failed', { msg }));

@@ -108,15 +108,30 @@ describe('resolveAction 路由表', () => {
 });
 
 describe('tabId 显式透传（评审阻断项 1）', () => {
-  it('screenshot：tabId 原样传给导出器，右键/快捷键固定 png', async () => {
+  it('screenshot：tabId 原样传给导出器，无 payload 缺省 png、节奏全自动', async () => {
     await dispatchAction('screenshot', CTX_MENU);
-    expect(exportScreenshot).toHaveBeenCalledWith('png', 42);
+    expect(exportScreenshot).toHaveBeenCalledWith('png', 42, {
+      maxSeconds: undefined,
+      stepSeconds: undefined,
+    });
     expect(tabsQuery).not.toHaveBeenCalled();
   });
 
-  it('screenshot：侧边栏入口可指定 pdf', async () => {
-    await dispatchAction('screenshot', CTX_PANEL, { format: 'pdf' });
-    expect(exportScreenshot).toHaveBeenCalledWith('pdf', 42);
+  it('screenshot：侧边栏与右键 PDF 项可指定 pdf，时长/停顿参数透传', async () => {
+    await dispatchAction('screenshot', CTX_PANEL, {
+      format: 'pdf',
+      maxSeconds: 30,
+      stepSeconds: 1.5,
+    });
+    expect(exportScreenshot).toHaveBeenCalledWith('pdf', 42, {
+      maxSeconds: 30,
+      stepSeconds: 1.5,
+    });
+    await dispatchAction('screenshot', CTX_MENU, { format: 'pdf' });
+    expect(exportScreenshot).toHaveBeenCalledWith('pdf', 42, {
+      maxSeconds: undefined,
+      stepSeconds: undefined,
+    });
   });
 
   it('summarize（panel）：目标页参数原样传入', async () => {

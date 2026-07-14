@@ -95,6 +95,41 @@ export function scrollDown(): void {
   window.scrollTo(0, window.scrollY + window.innerHeight);
 }
 
+/**
+ * 等当前屏渲染就绪（自适应，替代固定 sleep）：
+ * 连续两拍（150ms/拍）满足「视口内图片全部加载完 && 页面高度不再变」即返回——
+ * 静态页约 300ms 就过，懒加载页自动多等，最多等 maxWaitMs。
+ * 注入执行的自包含函数：不能引用模块作用域内容。
+ */
+export async function waitFrameReady(maxWaitMs: number): Promise<void> {
+  const TICK_MS = 150;
+  const started = Date.now();
+  let lastHeight = document.documentElement.scrollHeight;
+  let stable = 0;
+
+  const viewportImagesPending = (): boolean => {
+    const vh = window.innerHeight;
+    for (const img of Array.from(document.images)) {
+      const r = img.getBoundingClientRect();
+      const inView = r.bottom > 0 && r.top < vh && r.width > 0 && r.height > 0;
+      if (inView && !(img.complete && img.naturalWidth > 0)) return true;
+    }
+    return false;
+  };
+
+  while (Date.now() - started < maxWaitMs) {
+    await new Promise((r) => setTimeout(r, TICK_MS));
+    const h = document.documentElement.scrollHeight;
+    if (h === lastHeight && !viewportImagesPending()) {
+      stable += 1;
+      if (stable >= 2) return;
+    } else {
+      stable = 0;
+      lastHeight = h;
+    }
+  }
+}
+
 /** 收尾：移除禁动画样式、恢复悬浮元素透明度、滚回原始位置 */
 export function restorePage(origScrollY: number): void {
   const styleEl = document.getElementById('larksnap-shot-styles');

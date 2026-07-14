@@ -34,9 +34,13 @@ import {
  * 禁止调用 chrome.tabs.query({ active: true })，目标页只认 ctx 里的 tabId/url。
  */
 
-/** 动作附加参数（仅侧边栏入口用得到；右键/快捷键固定 png、无主题） */
+/** 动作附加参数：截图格式（侧边栏按钮与右键「整页导出 PDF」传 pdf，其余入口缺省 png） */
 export interface ActionPayload {
   format?: ScreenshotFormat;
+  /** 截图总时长上限（秒，侧边栏输入；无限滚动页控制截多久）。缺省用内置兜底 */
+  maxSeconds?: number;
+  /** 每屏滚动后的最少停顿（秒，侧边栏输入；重动画/背景图页手动加大）。缺省纯自适应 */
+  stepSeconds?: number;
 }
 
 export interface ActionRoute {
@@ -83,7 +87,12 @@ const ROUTES: Record<ActionId, ActionRoute> = {
     feedback: 'badge',
     run: (ctx, payload) => {
       const fmt: ScreenshotFormat = payload?.format === 'pdf' ? 'pdf' : 'png';
-      return trackedExport('screenshot', () => exportScreenshot(fmt, ctx.tabId));
+      return trackedExport('screenshot', () =>
+        exportScreenshot(fmt, ctx.tabId, {
+          maxSeconds: payload?.maxSeconds,
+          stepSeconds: payload?.stepSeconds,
+        })
+      );
     },
   },
   summarize: {

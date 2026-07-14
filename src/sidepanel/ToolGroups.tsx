@@ -43,20 +43,42 @@ async function loadCollapsed(): Promise<Record<GroupId, boolean>> {
   }
 }
 
-/** 消息调用 + 权限兜底重试 */
+/** 消息调用 + 权限兜底重试（request 异常不吞：原因直接给状态栏，便于定位授权弹不出的问题） */
 async function callWebcopy<T>(type: string, data?: unknown): Promise<Response<T>> {
   const res = await sendToBackground<T | WebCopyNeedsPermission>(type, data);
   const fallback = res.data as WebCopyNeedsPermission | undefined;
   if (!res.success && fallback?.needsPermission) {
+    let reqErr = '';
     const granted = await chrome.permissions
       .request({ origins: [fallback.originPattern] })
-      .catch(() => false);
+      .catch((e: unknown) => {
+        reqErr = e instanceof Error ? e.message : String(e);
+        return false;
+      });
     if (!granted) {
-      return { success: false, error: t('webcopy.notAuthorizedMenu') };
+      return { success: false, error: reqErr || t('webcopy.notAuthorizedMenu') };
     }
     return (await sendToBackground<T>(type, data)) as Response<T>;
   }
   return res as Response<T>;
+}
+
+/**
+ * 在用户点击手势里确保截图权限。
+ * 浏览器规定 captureVisibleTab 只认两种授权：activeTab（右键/快捷键入口自带）
+ * 或字面 <all_urls> 全站权限——站点级 *://host/* 授权对抓屏无效（Chromium 的
+ * CanCaptureVisiblePage 只查 match_all_urls 的 pattern）。侧边栏按钮拿不到
+ * activeTab，只能在这次点击里一次性申请 <all_urls>。
+ * 返回 null = 就绪；否则返回给状态栏显示的失败原因（拒绝/请求异常都要可见）。
+ */
+async function ensureShotPermission(): Promise<string | null> {
+  try {
+    if (await chrome.permissions.contains({ origins: ['<all_urls>'] })) return null;
+    const granted = await chrome.permissions.request({ origins: ['<all_urls>'] });
+    return granted ? null : t('webcopy.screenshot.denied');
+  } catch (e) {
+    return e instanceof Error ? e.message : String(e);
+  }
 }
 
 function sanitizeFilename(name: string): string {
@@ -129,6 +151,10 @@ export function ToolGroups({
   /** 剪贴板写入失败时展示结果，让用户手动复制 */
   const [preview, setPreview] = useState<string | null>(null);
   const [shotBusy, setShotBusy] = useState(false);
+  /** 截取时长上限（秒）输入值；空串 = 自动（内置兜底 2 分钟），无限滚动页手动指定 */
+  const [shotSecs, setShotSecs] = useState('');
+  /** 每屏最少停顿（秒）输入值；空串 = 纯自适应，重动画/背景图页手动加大 */
+  const [shotStep, setShotStep] = useState('');
 
   useEffect(() => {
     void loadCollapsed().then(setCollapsed);
@@ -278,9 +304,18 @@ export function ToolGroups({
     setStatusKind('idle');
     setStatus(t('webcopy.screenshot.preparing'));
     try {
-      // 缺主机权限时 callWebcopy 会在本次点击手势里 permissions.request 后自动重试
+      // 先在本次点击手势里把全站权限要到手，弹框才弹得出来（SW 抓图失败再弹就晚了）
+      const permErr = await ensureShotPermission();
+      if (permErr) {
+        report(false, permErr);
+        return;
+      }
+      const secs = Number(shotSecs);
+      const step = Number(shotStep);
       const res = await callWebcopy<{ truncated?: boolean }>(MSG.EXPORT_SCREENSHOT, {
         format,
+        maxSeconds: Number.isFinite(secs) && secs > 0 ? secs : undefined,
+        stepSeconds: Number.isFinite(step) && step > 0 ? step : undefined,
       });
       if (!res.success) report(false, res.error || t('webcopy.screenshot.failed'));
       // 成功文案由 PROGRESS 的 success 消息给出（含截断提示），此处不覆盖
@@ -396,6 +431,33 @@ export function ToolGroups({
             {t('webcopy.screenshot.pdf')}
           </button>
         </div>
+        <label className="wc-shot-time">
+          <span>{t('webcopy.screenshot.stepLabel')}</span>
+          <input
+            type="number"
+            min={0.1}
+            max={10}
+            step={0.5}
+            value={shotStep}
+            placeholder={t('webcopy.screenshot.timeAuto')}
+            disabled={disabled || shotBusy}
+            onChange={(e) => setShotStep(e.target.value)}
+          />
+          <span>{t('webcopy.screenshot.timeUnit')}</span>
+        </label>
+        <label className="wc-shot-time">
+          <span>{t('webcopy.screenshot.timeLabel')}</span>
+          <input
+            type="number"
+            min={5}
+            max={600}
+            value={shotSecs}
+            placeholder={t('webcopy.screenshot.timeAuto')}
+            disabled={disabled || shotBusy}
+            onChange={(e) => setShotSecs(e.target.value)}
+          />
+          <span>{t('webcopy.screenshot.timeUnit')}</span>
+        </label>
         <div className="wc-row-sub">{t('webcopy.screenshot.sub')}</div>
       </Group>
 
