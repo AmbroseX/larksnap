@@ -47,12 +47,15 @@ export async function stitch(req: ShotStitchRequest): Promise<ShotStitchResult> 
     reportProgress(i + 1, shots.length);
   }
 
-  const dataUrl = format === 'pdf' ? await toPdf(canvas) : canvas.toDataURL('image/png');
+  const dataUrl = format === 'pdf' ? await canvasToA4Pdf(canvas) : canvas.toDataURL('image/png');
   return { dataUrl, truncated };
 }
 
+/** canvas 高度安全上限，供其他离屏渲染（md→pdf）复用 */
+export const MAX_PDF_CANVAS_HEIGHT = MAX_CANVAS_HEIGHT;
+
 /** 把长图 canvas 按 A4 页高切成多页 PDF（不做单张超长页，阅读器难看且超长会渲染失败） */
-async function toPdf(canvas: HTMLCanvasElement): Promise<string> {
+export async function canvasToA4Pdf(canvas: HTMLCanvasElement): Promise<string> {
   const { jsPDF } = await import('jspdf');
   const pdf = new jsPDF({ orientation: 'portrait', unit: 'pt', format: 'a4' });
   const pageW = pdf.internal.pageSize.getWidth();

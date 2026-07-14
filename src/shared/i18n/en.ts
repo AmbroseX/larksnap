@@ -572,6 +572,12 @@ export const en: Dict = {
       done: 'PDF export complete',
       closed: 'Official PDF export is disabled for this tenant/document; cannot export PDF',
       failed: 'PDF export failed: {msg}',
+      viaMarkdown: 'Official PDF unavailable; rendering PDF from document content...',
+      rendering: 'Rendering PDF...',
+      doneTruncated: 'PDF export complete (long document; resolution reduced to fit everything)',
+      emptyDoc: 'No document content read; cannot generate PDF (login or permission may be required)',
+      offscreenNoResponse: 'Render page did not respond; PDF generation failed',
+      renderFailed: 'PDF rendering failed',
     },
     transcript: {
       fetching: 'Fetching subtitles...',

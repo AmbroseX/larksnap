@@ -548,6 +548,12 @@ export const zh = {
       done: 'PDF 导出完成',
       closed: '该租户/文档已关闭官方 PDF 导出，无法导出 PDF',
       failed: 'PDF 导出失败：{msg}',
+      viaMarkdown: '官方 PDF 不可用，改用正文自渲染生成 PDF...',
+      rendering: '正在渲染 PDF...',
+      doneTruncated: 'PDF 导出完成（文档较长，已压缩清晰度以完整收录）',
+      emptyDoc: '未读取到文档内容，无法生成 PDF（可能需要登录或无权限）',
+      offscreenNoResponse: '渲染页无响应，PDF 生成失败',
+      renderFailed: 'PDF 渲染失败',
     },
     transcript: {
       fetching: '正在抓取字幕...',

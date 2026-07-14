@@ -389,6 +389,22 @@ export interface ShotStitchProgress {
   total: number;
 }
 
+/** SW → offscreen：文档 HTML 渲染成多页 PDF（官方 PDF 关闭时的 md→pdf 回退） */
+export interface DocToPdfRequest {
+  /** 完整正文 HTML（含内联 <style>、图片已内联为 dataURL） */
+  html: string;
+  /** 渲染容器的 CSS 宽度（px），按 A4 宽取值 */
+  cssWidth: number;
+}
+
+/** offscreen → SW：md→pdf 渲染结果 */
+export interface DocToPdfResult {
+  /** 多页 PDF 的 dataURL */
+  dataUrl: string;
+  /** 文档过长、渲染时缩小以塞进画布上限（清晰度下降）时为 true */
+  truncated?: boolean;
+}
+
 /** 运行时状态（背景写入，UI 读取） */
 export interface RuntimeState {
   lastProgress: ExportProgress | null;

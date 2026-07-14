@@ -129,6 +129,8 @@ export const OFFSCREEN_MSG = {
   SHOT_STITCH: 'offscreen_shot_stitch',
   /** offscreen → SW：逐屏拼接进度（fire-and-forget） */
   SHOT_PROGRESS: 'offscreen_shot_progress',
+  /** SW → offscreen：文档 HTML 渲染成 PDF（官方 PDF 关闭时的 md→pdf 回退），data 为 DocToPdfRequest */
+  DOC_TO_PDF: 'offscreen_doc_to_pdf',
 } as const;
 
 /** content script 内部消息类型（背景 → content） */
