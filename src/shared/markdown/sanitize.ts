@@ -31,6 +31,7 @@ const ALLOWED: Record<string, ReadonlyArray<string>> = {
   th: ['align'],
   td: ['align'],
   a: ['href'],
+  img: ['src', 'alt', 'title'],
   strong: [],
   em: [],
   del: [],
@@ -51,14 +52,31 @@ function isSafeHref(value: string): boolean {
   }
 }
 
+/** img 的 src：http/https/data/blob 放行；解析不出协议的当相对路径保留（编辑器再换成 blob） */
+function isSafeImgSrc(value: string): boolean {
+  let u: URL;
+  try {
+    u = new URL(value);
+  } catch {
+    return true; // 相对路径（如 images/x.png）——留着交给 resolveSrc 处理
+  }
+  return (
+    u.protocol === 'http:' ||
+    u.protocol === 'https:' ||
+    u.protocol === 'data:' ||
+    u.protocol === 'blob:'
+  );
+}
+
 function keepAttr(tag: string, name: string, value: string): boolean {
   if (!ALLOWED[tag]?.includes(name)) return false;
   if (tag === 'a' && name === 'href') return isSafeHref(value);
   if (tag === 'code' && name === 'class') return CODE_CLASS_RE.test(value);
+  if (tag === 'img' && name === 'src') return isSafeImgSrc(value);
   return true;
 }
 
-function sanitizeChildren(parent: Element): void {
+function sanitizeChildren(parent: Element, allowImages: boolean): void {
   for (const child of Array.from(parent.childNodes)) {
     if (child.nodeType === Node.TEXT_NODE) continue;
     if (child.nodeType !== Node.ELEMENT_NODE) {
@@ -68,11 +86,22 @@ function sanitizeChildren(parent: Element): void {
     const el = child as Element;
     const tag = el.tagName.toLowerCase();
 
-    // 图片降级为 alt 文本（不发外部请求）
+    // img 默认降级为 alt 文本（对话页渲染远程内容，不发外部请求防泄漏）；
+    // 只有本地编辑器这类可信场景显式开 allowImages 才保留图片。
     if (tag === 'img') {
-      const alt = el.getAttribute('alt')?.trim();
-      if (alt) el.replaceWith(el.ownerDocument.createTextNode(`[${alt}]`));
-      else el.remove();
+      if (!allowImages) {
+        const alt = el.getAttribute('alt')?.trim();
+        if (alt) el.replaceWith(el.ownerDocument.createTextNode(`[${alt}]`));
+        else el.remove();
+        continue;
+      }
+      // 保留 img，但按白名单裁属性（src 走 isSafeImgSrc），src 非法则整删
+      for (const attr of Array.from(el.attributes)) {
+        if (!keepAttr('img', attr.name.toLowerCase(), attr.value)) {
+          el.removeAttribute(attr.name);
+        }
+      }
+      if (!el.getAttribute('src')) el.remove();
       continue;
     }
 
@@ -90,13 +119,16 @@ function sanitizeChildren(parent: Element): void {
       el.setAttribute('target', '_blank');
       el.setAttribute('rel', 'noopener noreferrer');
     }
-    sanitizeChildren(el);
+    sanitizeChildren(el, allowImages);
   }
 }
 
-/** 输入 marked 渲染出的 HTML（或任意不可信 HTML），输出白名单内的安全 HTML */
-export function sanitizeHtml(html: string): string {
+/**
+ * 输入 marked 渲染出的 HTML（或任意不可信 HTML），输出白名单内的安全 HTML。
+ * allowImages：默认 false（对话页删图防泄漏）；本地编辑器传 true 以保留图片。
+ */
+export function sanitizeHtml(html: string, allowImages = false): string {
   const doc = new DOMParser().parseFromString(html, 'text/html');
-  sanitizeChildren(doc.body);
+  sanitizeChildren(doc.body, allowImages);
   return doc.body.innerHTML;
 }

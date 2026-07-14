@@ -12,7 +12,7 @@ import { CHAT_PORT_NAME, MSG } from '../shared/constants';
 import { sendToBackground } from '../shared/messaging';
 import { getConfig, saveConfig } from '../shared/storage';
 import { callWithPermission, copyToClipboard } from './permission-call';
-import { Markdown } from './Markdown';
+import { Markdown } from '../shared/markdown/Markdown';
 import { t } from '../shared/i18n';
 import { useI18n } from '../shared/i18n/useI18n';
 

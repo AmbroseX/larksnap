@@ -362,6 +362,21 @@ export function ToolGroups({
     <section className={`tool-groups${disabled ? ' disabled' : ''}`}>
       <div className="section-title">{t('sidepanel.sectionTools')}</div>
 
+      <div className="wc-btn-row">
+        <button
+          type="button"
+          className="wc-btn"
+          onClick={() =>
+            void chrome.tabs.create({ url: chrome.runtime.getURL('editor.html') })
+          }
+        >
+          {t('editor.entry')}
+        </button>
+      </div>
+      <div className="wc-row-sub" style={{ marginBottom: 8 }}>
+        {t('editor.entrySub')}
+      </div>
+
       <Group
         id="webcopy"
         title={t('sidepanel.groupWebcopy')}

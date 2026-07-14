@@ -14,16 +14,54 @@ import { sanitizeHtml } from './sanitize';
 
 const THROTTLE_MS = 150;
 
-function render(text: string): string {
-  return sanitizeHtml(marked.parse(text, { async: false }) as string);
+/** 把相对路径 img src 换成解析结果（本地编辑器用：images/x.png → blob:...） */
+function rewriteImg(html: string, resolveSrc: (src: string) => string | undefined): string {
+  const doc = new DOMParser().parseFromString(html, 'text/html');
+  let touched = false;
+  doc.querySelectorAll('img').forEach((img) => {
+    const src = img.getAttribute('src');
+    if (!src) return;
+    const mapped = resolveSrc(src);
+    if (mapped) {
+      img.setAttribute('src', mapped);
+      touched = true;
+    }
+  });
+  return touched ? doc.body.innerHTML : html;
 }
 
-export function Markdown({ text, streaming = false }: { text: string; streaming?: boolean }) {
+function render(
+  text: string,
+  allowImages: boolean,
+  resolveSrc?: (src: string) => string | undefined
+): string {
+  const html = sanitizeHtml(marked.parse(text, { async: false }) as string, allowImages);
+  return resolveSrc ? rewriteImg(html, resolveSrc) : html;
+}
+
+export function Markdown({
+  text,
+  streaming = false,
+  allowImages = false,
+  resolveSrc,
+}: {
+  text: string;
+  streaming?: boolean;
+  /** 是否保留图片（本地编辑器传 true；对话页默认 false 防远程图泄漏） */
+  allowImages?: boolean;
+  /** 相对路径解析器（返回可用 URL，如 blob:）；不传则相对图片按原样（多半加载失败） */
+  resolveSrc?: (src: string) => string | undefined;
+}) {
   const [html, setHtml] = useState('');
   const boxRef = useRef<HTMLDivElement | null>(null);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const textRef = useRef(text);
   textRef.current = text;
+  // allowImages/resolveSrc 走 ref，render 取最新值，不用塞进 effect 依赖
+  const allowImagesRef = useRef(allowImages);
+  allowImagesRef.current = allowImages;
+  const resolveSrcRef = useRef(resolveSrc);
+  resolveSrcRef.current = resolveSrc;
 
   useEffect(() => {
     if (!streaming) {
@@ -31,13 +69,13 @@ export function Markdown({ text, streaming = false }: { text: string; streaming?
         clearTimeout(timerRef.current);
         timerRef.current = null;
       }
-      setHtml(render(textRef.current));
+      setHtml(render(textRef.current, allowImagesRef.current, resolveSrcRef.current));
       return;
     }
     if (timerRef.current) return; // 已排程：触发时取 textRef 里的最新文本
     timerRef.current = setTimeout(() => {
       timerRef.current = null;
-      setHtml(render(textRef.current));
+      setHtml(render(textRef.current, allowImagesRef.current, resolveSrcRef.current));
     }, THROTTLE_MS);
   }, [text, streaming]);
 

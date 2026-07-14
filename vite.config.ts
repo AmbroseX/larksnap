@@ -173,6 +173,7 @@ export default defineConfig(({ mode }) => {
           background: resolve(__dirname, 'src/background/index.ts'),
           options: resolve(__dirname, 'options.html'),
           sidepanel: resolve(__dirname, 'sidepanel.html'),
+          editor: resolve(__dirname, 'editor.html'),
           offscreen: resolve(__dirname, 'offscreen.html'),
         },
         output: {
