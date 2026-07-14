@@ -17,11 +17,16 @@ export async function callWithPermission<T>(
   const res = await sendToBackground<T | WebCopyNeedsPermission>(type, data);
   const fallback = res.data as WebCopyNeedsPermission | undefined;
   if (!res.success && fallback?.needsPermission) {
+    // request 异常不吞：真实原因（如手势失效）直接回给 UI 显示，便于定位授权弹不出的问题
+    let reqErr = '';
     const granted = await chrome.permissions
       .request({ origins: [fallback.originPattern] })
-      .catch(() => false);
+      .catch((e: unknown) => {
+        reqErr = e instanceof Error ? e.message : String(e);
+        return false;
+      });
     if (!granted) {
-      return { success: false, error: t('webcopy.notAuthorized') };
+      return { success: false, error: reqErr || t('webcopy.notAuthorized') };
     }
     return (await sendToBackground<T>(type, data)) as Response<T>;
   }
