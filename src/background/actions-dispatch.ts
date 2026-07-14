@@ -99,7 +99,7 @@ const ROUTES: Record<ActionId, ActionRoute> = {
     run: (ctx) =>
       ctx.source === 'panel'
         ? webcopySelectionMd(ctx.tabId, ctx.url)
-        : webcopySelectionMdInPage(ctx.tabId),
+        : webcopySelectionMdInPage(ctx.tabId, ctx.url),
   },
   screenshot: {
     feedback: 'badge',
@@ -129,7 +129,7 @@ const ROUTES: Record<ActionId, ActionRoute> = {
   unlock: {
     // 页内 toast 已是反馈；侧边栏的显式开关（带 enabled 参数）走原消息通道
     feedback: 'none',
-    run: (ctx) => webcopyUnlockInPage(ctx.tabId),
+    run: (ctx) => webcopyUnlockInPage(ctx.tabId, ctx.url),
   },
   'open-panel': {
     feedback: 'none',

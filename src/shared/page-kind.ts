@@ -1,5 +1,5 @@
 import type { PageKindInfo } from './types';
-import { VIDEO_SITES } from './constants';
+import { VIDEO_SITES, CLIP_SITES } from './constants';
 import { detectDocFromUrl } from '../content/feishu-detect';
 
 /**
@@ -28,6 +28,23 @@ export function matchVideoSite(url: string): string | null {
     if (hosts.some((h) => host === h || host.endsWith(`.${h}`))) return site;
   }
   return null;
+}
+
+/**
+ * 剪藏站点归类：命中白名单返回 site 枚举名，其余一律 'other'。
+ * 只吐有限枚举，绝不回真实域名——统计上报靠它把「哪类站」收成可枚举的桶。
+ */
+export function matchClipSite(url: string): string {
+  let host: string;
+  try {
+    host = new URL(url).hostname.toLowerCase();
+  } catch {
+    return 'other';
+  }
+  for (const { site, hosts } of CLIP_SITES) {
+    if (hosts.some((h) => host === h || host.endsWith(`.${h}`))) return site;
+  }
+  return 'other';
 }
 
 /** 是否 YouTube 视频观看页：host 复用 VIDEO_SITES 的 youtube 列表，仅 /watch 路径算 */

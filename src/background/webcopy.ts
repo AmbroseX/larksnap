@@ -7,14 +7,22 @@ import type {
 } from '../shared/types';
 import { CONTENT_MSG } from '../shared/constants';
 import { t } from '../shared/i18n';
+import { matchClipSite } from '../shared/page-kind';
 import { findAdapter, type AdapterExtractResult, type SiteAdapter } from './webcopy-adapters';
 import { track } from './analytics';
 import { downloadBase64, safeName } from './download';
 import { bytesToBase64 } from './media-util';
 
-/** webcopy 动作统计（只报动作枚举，不含页面信息） */
-function trackWebcopy(action: 'page' | 'selection' | 'unlock' | 'tabs'): void {
-  void track({ name: 'webcopy', url: `/webcopy/${action}`, data: { action } });
+/**
+ * webcopy 动作统计。只报动作枚举 + 站点枚举（site），不含真实域名/URL。
+ * site 由白名单归类：命中报站名，其余 'other'；缺 url（如复制全部标签页）报 'other'。
+ */
+function trackWebcopy(
+  action: 'page' | 'selection' | 'unlock' | 'tabs',
+  url?: string
+): void {
+  const site = url ? matchClipSite(url) : 'other';
+  void track({ name: 'webcopy', url: `/webcopy/${action}`, data: { action, site } });
 }
 
 /**
@@ -35,7 +43,7 @@ export { isRestrictedUrl };
 
 /** 整页转 MD（页内反馈版）：适配器主世界路径 + 通用管线，content 自己写剪贴板 + toast */
 export async function webcopyPageMdInPage(tabId: number, url: string): Promise<Response> {
-  trackWebcopy('page');
+  trackWebcopy('page', url);
   // 百度文库等特殊站点：整页转换走适配器（主世界抓正文），并在主世界写剪贴板
   const adapter = findAdapter(url);
   if (adapter) {
@@ -57,7 +65,7 @@ export async function webcopyPageMdInPage(tabId: number, url: string): Promise<R
 
 /** 整页转 MD 并下载 .md（右键入口）：转换管线同复制版，产物由 SW 落盘到下载目录 */
 export async function webcopyPageMdDownloadInPage(tabId: number, url: string): Promise<Response> {
-  trackWebcopy('page');
+  trackWebcopy('page', url);
   let markdown = '';
   let title = '';
   const adapter = findAdapter(url);
@@ -88,15 +96,15 @@ export async function webcopyPageMdDownloadInPage(tabId: number, url: string): P
 }
 
 /** 选区转 MD（页内反馈版） */
-export async function webcopySelectionMdInPage(tabId: number): Promise<Response> {
-  trackWebcopy('selection');
+export async function webcopySelectionMdInPage(tabId: number, url: string): Promise<Response> {
+  trackWebcopy('selection', url);
   await injectWebcopy(tabId);
   return sendToTab(tabId, CONTENT_MSG.WEBCOPY_SELECTION_TO_MD, { writeClipboard: true });
 }
 
 /** 解锁开关切换（页内反馈版，缺省取反） */
-export async function webcopyUnlockInPage(tabId: number): Promise<Response> {
-  trackWebcopy('unlock');
+export async function webcopyUnlockInPage(tabId: number, url: string): Promise<Response> {
+  trackWebcopy('unlock', url);
   await injectWebcopy(tabId);
   return sendToTab(tabId, CONTENT_MSG.WEBCOPY_UNLOCK, {});
 }
@@ -237,7 +245,7 @@ export async function webcopyPageMd(
   tabId: number,
   url: string
 ): Promise<Response<WebCopyMdResult | WebCopyNeedsPermission>> {
-  trackWebcopy('page');
+  trackWebcopy('page', url);
   if (isRestrictedUrl(url)) {
     return { success: false, error: t('bg.restrictedWebcopy') };
   }
@@ -269,7 +277,7 @@ export async function webcopyPageMd(
 
 /** 选区转 Markdown */
 export function webcopySelectionMd(tabId: number, url: string) {
-  trackWebcopy('selection');
+  trackWebcopy('selection', url);
   return withInjectedTab<WebCopyMdResult>(tabId, url, (id) =>
     sendToTab<WebCopyMdResult>(id, CONTENT_MSG.WEBCOPY_SELECTION_TO_MD, {})
   );
@@ -277,7 +285,7 @@ export function webcopySelectionMd(tabId: number, url: string) {
 
 /** 解锁开关 */
 export function webcopyToggleUnlock(tabId: number, url: string, enabled: boolean) {
-  trackWebcopy('unlock');
+  trackWebcopy('unlock', url);
   return withInjectedTab<{ enabled: boolean }>(tabId, url, (id) =>
     sendToTab<{ enabled: boolean }>(id, CONTENT_MSG.WEBCOPY_UNLOCK, {
       enabled,
