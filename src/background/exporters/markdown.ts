@@ -43,7 +43,9 @@ export async function exportMarkdown(doc: DocInfo): Promise<Response> {
     try {
       return await runOfficialMd(doc);
     } catch (err) {
-      if (err instanceof NotLoggedInError) return fail('markdown', err.message);
+      // 未登录/CSRF：官方导出要登录，但公开分享的文档解码（client_vars）匿名也能读，
+      // 故先试解码，读得到就出稿；真读不到（私有文档）再提示登录，而非硬失败。
+      if (err instanceof NotLoggedInError) return runDecodeMd(doc, config, false, err.message);
       if (err instanceof ExportDisabledError) await invalidate(doc.host);
       else return fail('markdown', errMsg(err));
     }
@@ -61,7 +63,8 @@ export async function exportMarkdown(doc: DocInfo): Promise<Response> {
     await recordSupported(doc.host);
     return r;
   } catch (err) {
-    if (err instanceof NotLoggedInError) return fail('markdown', err.message);
+    // 同上：未登录先试解码（公开文档匿名可读），读不到再提示登录
+    if (err instanceof NotLoggedInError) return runDecodeMd(doc, config, false, err.message);
     if (err instanceof ExportDisabledError) {
       await recordUnsupported(doc.host);
       return runDecodeMd(doc, config, true);
@@ -98,7 +101,9 @@ async function runOfficialMd(doc: DocInfo): Promise<Response> {
 async function runDecodeMd(
   doc: DocInfo,
   config: ExtensionConfig,
-  bypassNotice: boolean
+  bypassNotice: boolean,
+  /** 官方导出未登录回退时传入：解码也读不到内容（私有文档）时用它提示登录，而非静默出空文件 */
+  loginHint?: string
 ): Promise<Response> {
   try {
     if (bypassNotice) {
@@ -118,6 +123,18 @@ async function runDecodeMd(
       data,
       resolved.objToken
     );
+
+    // 官方导出未登录回退到这里：若解码同样一无所获（私有文档匿名读不到），
+    // 明确提示登录，别下载一个空 .md 让人以为成功了。
+    if (
+      loginHint &&
+      !markdown.trim() &&
+      images.length === 0 &&
+      sheetBlocks.length === 0 &&
+      whiteboards.length === 0
+    ) {
+      return fail('markdown', loginHint);
+    }
 
     const title = resolved.title || doc.title || doc.token;
     let finalMd = markdown;

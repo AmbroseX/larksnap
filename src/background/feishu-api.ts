@@ -54,7 +54,9 @@ export async function resolveObjToken(doc: DocInfo): Promise<ResolvedDoc> {
   return {
     objToken: String(n?.obj_token ?? wikiToken),
     wikiToken,
-    spaceId,
+    // 飞书个人版(my.feishu.cn)的 tree/get_info 常报 PermFail，拿不到 space_id；
+    // 但 get_node 的响应里带 space_id，用它兜底，client_vars 翻页更稳。
+    spaceId: spaceId ?? (n?.space_id != null ? String(n.space_id) : undefined),
     title: (n?.title as string) ?? doc.title,
   };
 }

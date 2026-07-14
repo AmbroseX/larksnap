@@ -51,13 +51,26 @@ async function fetchWithRetry(
 }
 
 export async function feishuGet<T = unknown>(path: string): Promise<T> {
-  const res = await fetchWithRetry(`${location.origin}${path}`, {
-    method: 'GET',
-    credentials: 'include',
-    headers: { accept: 'application/json, text/plain, */*' },
-  });
-  if (!res.ok) throw new Error(`HTTP ${res.status}`);
-  return res.json() as Promise<T>;
+  // 429/503 是限流/暂时不可用：解码路径会密集翻页（client_vars 一篇好几页 + 补拉子树），
+  // 个人版/匿名限流更严。这里做退避重试（尊重 Retry-After），别让一次限流就崩掉整篇导出。
+  for (let attempt = 0; ; attempt++) {
+    const res = await fetchWithRetry(`${location.origin}${path}`, {
+      method: 'GET',
+      credentials: 'include',
+      headers: { accept: 'application/json, text/plain, */*' },
+    });
+    if (res.ok) return res.json() as Promise<T>;
+    if ((res.status === 429 || res.status === 503) && attempt < 4) {
+      const retryAfter = Number(res.headers.get('retry-after'));
+      const wait =
+        Number.isFinite(retryAfter) && retryAfter > 0
+          ? retryAfter * 1000
+          : 700 * 2 ** attempt; // 700ms → 1.4s → 2.8s → 5.6s
+      await sleep(Math.min(wait, 8000));
+      continue;
+    }
+    throw new Error(`HTTP ${res.status}`);
+  }
 }
 
 /** 把对象编成 x-www-form-urlencoded 串（跳过 undefined 值） */
