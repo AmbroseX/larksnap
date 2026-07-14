@@ -14,15 +14,22 @@ export function setDownloadSink(sink: DownloadSink | null): void {
 
 // 控制字符（U+0000–U+001F 与 U+007F）：文件名里出现会被判非法
 const CONTROL_CHARS = new RegExp('[\\u0000-\\u001f\\u007f]', 'g');
+// 格式类隐形字符（Unicode Cf：零宽空格 U+200B、方向控制符、BOM 等）：
+// 飞书文档标题里偶发混入，带进 zip 内文件名会让 macOS 归档工具把整个包
+// 判成"格式不支持"（实例见 docs/bugs）。整类剔除，代价是标题里
+// 靠零宽连接符组合的 emoji 可能拆开——文件名场景可接受。
+const FORMAT_CHARS = /\p{Cf}/gu;
 const ILLEGAL_CHARS = /[\\/:*?"<>|]/g;
 
 /**
  * 文件名清洗 —— chrome.downloads 对文件名很挑剔：控制字符、首尾空格/点、
- * 保留符号都会被判 "Invalid filename"。这里逐项剔除并兜底非空。
+ * 保留符号都会被判 "Invalid filename"；zip 内路径同样经这里清洗。
+ * NFC 归一化 + 逐项剔除并兜底非空。
  */
 export function safeName(name: string): string {
-  let n = (name ?? '').toString();
+  let n = (name ?? '').toString().normalize('NFC');
   n = n.replace(CONTROL_CHARS, '');
+  n = n.replace(FORMAT_CHARS, '');
   n = n.replace(ILLEGAL_CHARS, '_');
   n = n.replace(/\s+/g, ' '); // 合并空白
   n = n.replace(/^[.\s]+|[.\s]+$/g, ''); // 去首尾的点与空格
