@@ -20,6 +20,7 @@ import { extractEmbeddedSheets, sheetToMdTable } from './sheet';
 import { extractWhiteboards } from './whiteboard';
 import { createZipDataUrl, type ZipFile } from '../zip';
 import { downloadBase64, downloadDataUrl, safeName } from '../download';
+import { downloadCloudFile } from './file';
 import {
   base64ToBytes,
   extFromMime,
@@ -35,6 +36,7 @@ import {
  * 用户始终单一入口，内部自动选路 + 失败回退。
  */
 export async function exportMarkdown(doc: DocInfo): Promise<Response> {
+  if (doc.docType === 'file') return downloadCloudFile(doc);
   const config = await getConfig();
   const cap = await getCapability(doc.host);
 

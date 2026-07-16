@@ -65,6 +65,33 @@ export function mediaDownloadUrls(
   return [all, cover];
 }
 
+/**
+ * 云盘独立文件（/file/{token}）下载候选。真机抓包实测（讯飞私有化）。
+ *
+ * 两条路，按序尝试：
+ * 1) download/all：拿**原件**（保真、含正确文件名/扩展名）。独立文件必须带
+ *    `mount_node_token` + `mount_point=explorer`（explorer=云空间独立文件）。
+ * 2) download/preview：原件下载被权限禁用（仅预览）时，`download/all` 回 403，
+ *    此时退预览流。`preview_type=9` 必带（缺了回 400），`version` 可省。
+ *    ⚠️ 预览流对非 PDF 文件返回的是飞书渲染出的 PDF，不是原格式——够用即可。
+ * URL 形态照抄已验证可用的媒体地址：`download/all/{token}/?...`（token 后带斜杠）。
+ */
+export function fileDownloadUrls(
+  host: string,
+  token: string,
+  mountToken = token
+): string[] {
+  const ds = driveStreamHost(host);
+  const file = encodeURIComponent(token);
+  const mount = encodeURIComponent(mountToken);
+  const base = `https://${ds}/space/api/box/stream`;
+  return [
+    `${base}/download/all/${file}/?mount_node_token=${mount}&mount_point=explorer`,
+    `${base}/download/all/${file}/?mount_node_token=${mount}`,
+    `${base}/download/preview/${file}?preview_type=9&mount_point=explorer`,
+  ];
+}
+
 /** 导出任务产物(file_token)的下载 URL（download/all，mount 用文档 token） */
 export function exportFileUrls(
   host: string,

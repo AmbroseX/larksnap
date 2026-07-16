@@ -14,6 +14,8 @@ import { downloadImageDataUrls } from '../image-map';
 import { extractWhiteboards } from './whiteboard';
 import { withOffscreen } from '../offscreen';
 import { downloadBase64, downloadDataUrl, safeName } from '../download';
+import { downloadMedia } from '../feishu-proxy';
+import { extFromMime, fileDownloadUrls } from '../media-util';
 
 /** A4 内容区渲染宽度（px，约 A4 @96dpi 去掉页边距），offscreen 按它排版再切页 */
 const A4_CONTENT_WIDTH = 794;
@@ -28,6 +30,10 @@ const TRANSPARENT_PNG =
  */
 export async function exportPdf(doc: DocInfo): Promise<Response> {
   await reportProgress('pdf', 'running', t('progress.pdf.creating'), 15);
+
+  // 云盘文件没有 client_vars 正文块；PDF 文件直接下载文件流，
+  // 并复用 download/all → preview_tpl3 的兼容候选链。
+  if (doc.docType === 'file') return downloadCloudFileAsPdf(doc);
 
   try {
     const resolved = await resolveObjToken(doc);
@@ -58,6 +64,27 @@ export async function exportPdf(doc: DocInfo): Promise<Response> {
     if (err instanceof NotLoggedInError) {
       return exportPdfViaDecode(doc, err.message);
     }
+    const msg = err instanceof Error ? err.message : String(err);
+    await reportProgress('pdf', 'error', t('progress.pdf.failed', { msg }));
+    return { success: false, error: msg };
+  }
+}
+
+async function downloadCloudFileAsPdf(doc: DocInfo): Promise<Response> {
+  try {
+    await reportProgress('pdf', 'running', t('progress.pdf.downloading'), 70);
+    const media = await downloadMedia(fileDownloadUrls(doc.host, doc.token));
+    const ext = extFromMime(media.mimeType, doc.title);
+    if (ext.toLowerCase() !== 'pdf' && !/application\/pdf/i.test(media.mimeType)) {
+      const msg = '当前云盘文件不是 PDF，无法直接导出为 PDF';
+      await reportProgress('pdf', 'error', msg);
+      return { success: false, error: msg };
+    }
+    const title = safeName(doc.title || doc.token);
+    await downloadBase64(media.base64, 'application/pdf', `${title.replace(/\.pdf$/i, '')}.pdf`);
+    await reportProgress('pdf', 'success', t('progress.pdf.done'), 100);
+    return { success: true };
+  } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     await reportProgress('pdf', 'error', t('progress.pdf.failed', { msg }));
     return { success: false, error: msg };
