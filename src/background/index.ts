@@ -1,7 +1,7 @@
 import type { DispatchContext, Message, Response, TrackEvent } from '../shared/types';
 import { MSG, OFFSCREEN_MSG } from '../shared/constants';
 import { ensureI18n, t } from '../shared/i18n';
-import { getRuntimeState } from '../shared/storage';
+import { getRuntimeState, recordTrustedOrigin } from '../shared/storage';
 import { detectActiveDoc, detectDocForTab, getActiveTab } from './doc-detect';
 import { getSnapshot } from './feishu-proxy';
 import { reportProgress } from './progress';
@@ -14,6 +14,7 @@ import { cacheDoc, listCache, removeCache, getCache } from './cache-manager';
 import { exportDiagnostic } from './diagnostic';
 import { getCookie } from './cookie';
 import { hasPermissionForHost, recordTrusted, revokePermission, listTrusted } from './permissions';
+import { baseFromPattern } from '../shared/feishu-host';
 import { startBridge, getBridgeStatus } from './bridge';
 import {
   getVideoState,
@@ -164,8 +165,14 @@ async function handleMessage(
     case MSG.REQUEST_PERMISSION: {
       // UI 已在用户手势中完成 chrome.permissions.request；此处只持久化授权 pattern。
       // 右键菜单的飞书组可见性按当前页识别动态维护，与授权列表无关。
-      const { pattern } = (message.data || {}) as { pattern?: string };
-      if (pattern) await recordTrusted(pattern);
+      const { pattern, origin } = (message.data || {}) as { pattern?: string; origin?: string };
+      if (pattern) {
+        await recordTrusted(pattern);
+        // 顺手记真实租户 origin（new-doc 免链接建档用，007）：只认飞书授权的
+        // 基础域通配形状——AI 端点等其他 pattern 形状 baseFromPattern 返回 null 自然跳过
+        const base = baseFromPattern(pattern);
+        if (base && origin) await recordTrustedOrigin(base, origin);
+      }
       return { success: true };
     }
     case MSG.REVOKE_PERMISSION: {

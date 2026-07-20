@@ -48,8 +48,17 @@ process.on('uncaughtException', (e) => {
 
 const extConns = new Map(); // contextId -> WSConnection（每个浏览器 profile 一条）
 const pending = new Map(); // jobId -> { res, contextId }（CLI 流式响应）
+// GET /hosts 的在途查询（v4）：一次性 JSON 响应，与 pending 的 NDJSON 流形状不同，独立收口
+const pendingHosts = new Map(); // id -> { res, timer, contextId }
 let jobSeq = 0;
 let idleTimer = null;
+
+/** GET /hosts 的错误统一形状：200 + { ok:false, error:{subtype,message} }（供 CLI 按 subtype 分支） */
+function hostsError(res, subtype, message) {
+  res
+    .writeHead(200, { 'content-type': 'application/json' })
+    .end(JSON.stringify({ ok: false, error: { subtype, message } }));
+}
 
 /** 路由到目标扩展连接。返回 { conn } 或 { error, subtype }（subtype 供 CLI 错误契约分支）。 */
 function resolveConn(contextId) {
@@ -154,6 +163,43 @@ const httpServer = createServer(async (req, res) => {
     res
       .writeHead(200, { 'content-type': 'application/json' })
       .end(JSON.stringify({ ok: true, daemonVersion: DAEMON_VERSION, profiles: [...extConns.keys()] }));
+    return;
+  }
+
+  // 已授权域名清单（v4，007）：只读端点，独立于 /command（那条链路三层都要求 url）。
+  // 内部向扩展发 list-domains，收 domains-result 后回一次性 JSON。
+  if (req.method === 'GET' && pathname === '/hosts') {
+    const profile = new URL(req.url || '/', 'http://localhost').searchParams.get('profile') || undefined;
+    const routed = resolveConn(profile);
+    if (routed.error) {
+      hostsError(res, routed.subtype, routed.error);
+      return;
+    }
+    if ((routed.conn._proto ?? 0) < 4) {
+      hostsError(
+        res,
+        'extension_outdated',
+        `扩展协议版本过旧（v${routed.conn._proto ?? '?'}），不支持域名清单：请重新构建/加载扩展。`
+      );
+      return;
+    }
+    const id = `h${++jobSeq}`;
+    const timer = setTimeout(() => {
+      pendingHosts.delete(id);
+      hostsError(res, 'extension_timeout', '等待扩展回包超时（Service Worker 休眠？点扩展图标唤醒后重试）。');
+      armIdle();
+    }, 10_000);
+    pendingHosts.set(id, { res, timer, contextId: routed.conn._contextId });
+    armIdle();
+    res.on('close', () => {
+      const entry = pendingHosts.get(id);
+      if (entry) {
+        clearTimeout(entry.timer);
+        pendingHosts.delete(id); // CLI 提前断开
+      }
+    });
+    routed.conn.send(JSON.stringify({ type: 'list-domains', id }));
+    log('hosts query', id, routed.conn._contextId);
     return;
   }
 
@@ -301,6 +347,27 @@ attachWsServer(httpServer, {
         });
         return;
       }
+      // 域名清单回包（v4）：一次性 JSON 响应，先于 NDJSON 流的通用业务分支路由
+      if (msg.type === 'domains-result') {
+        const entry = msg.id != null ? pendingHosts.get(msg.id) : null;
+        if (!entry) return;
+        clearTimeout(entry.timer);
+        pendingHosts.delete(msg.id);
+        try {
+          if (msg.error) {
+            hostsError(entry.res, 'list_domains_failed', `扩展侧拼域名清单失败: ${msg.error}`);
+          } else {
+            entry.res
+              .writeHead(200, { 'content-type': 'application/json' })
+              .end(JSON.stringify({ ok: true, domains: msg.domains || [] }));
+          }
+        } catch {
+          /* CLI 已断 */
+        }
+        log('hosts done', msg.id, msg.error ? `ext-error: ${msg.error}` : `${(msg.domains || []).length} domains`);
+        armIdle();
+        return;
+      }
       // 业务消息（progress/result/error/need-login/need-auth），按 id 写回 CLI 流
       const entry = msg.id != null ? pending.get(msg.id) : null;
       if (!entry) return;
@@ -331,6 +398,17 @@ attachWsServer(httpServer, {
         conn._videoJobs.clear();
       }
       log('extension disconnected', cid || '(未 hello)');
+      // 该 profile 的在途域名清单查询收尾报错（不等 10s 超时）
+      for (const [id, entry] of pendingHosts) {
+        if (cid && entry.contextId !== cid) continue;
+        clearTimeout(entry.timer);
+        pendingHosts.delete(id);
+        try {
+          hostsError(entry.res, 'extension_not_connected', '扩展断开（Service Worker 休眠？点扩展图标唤醒后重试）。');
+        } catch {
+          /* 忽略 */
+        }
+      }
       // 该 profile 的在途任务收尾报错
       for (const [id, entry] of pending) {
         if (cid && entry.contextId !== cid) continue;

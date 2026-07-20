@@ -55,3 +55,14 @@ export function hostOf(url: string): string {
 export function permissionPattern(host: string): string {
   return `*://*.${baseDomain(host)}/*`;
 }
+
+/**
+ * permissionPattern 的逆运算：'*://*.a.example.com/*' → 'a.example.com'。
+ * 只认侧边栏飞书授权产出的基础域通配形状；其他形状返回 null——
+ * trustedDomains 里还混着设置页 AI 端点存的 'https://host/*'（Options.tsx），
+ * 那不是飞书域名，域名清单（007）与撤销清理都靠这里过滤。
+ */
+export function baseFromPattern(pattern: string): string | null {
+  const m = /^\*:\/\/\*\.([^/*]+)\/\*$/.exec(pattern);
+  return m ? m[1] : null;
+}

@@ -9,7 +9,7 @@ import type {
 } from '../shared/types';
 import { MSG, STORAGE_KEYS } from '../shared/constants';
 import { sendToBackground, onBackgroundMessage } from '../shared/messaging';
-import { hostOf, permissionPattern } from '../shared/feishu-host';
+import { hostOf, originOf, permissionPattern } from '../shared/feishu-host';
 import { useI18n } from '../shared/i18n/useI18n';
 import { type ActionItem } from './actions';
 import { copyHtmlToClipboard } from './copy-html';
@@ -206,7 +206,9 @@ export function SidePanel() {
         // 飞书导出组的显示范围，普通网页的域名混进去会让「导出为 Markdown/PDF」
         // 出现在非飞书页面上（点了必失败）。普通网页只授权、不记录。
         if (doc.isFeishuDoc) {
-          await sendToBackground(MSG.REQUEST_PERMISSION, { pattern });
+          // origin 顺手带上：授权页的真实租户 origin（pattern 里被剥掉的子域），
+          // new-doc 免链接建档用（007）
+          await sendToBackground(MSG.REQUEST_PERMISSION, { pattern, origin: originOf(doc.url) });
         }
         await refreshDoc();
         setStatus(

@@ -22,13 +22,21 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { fail as baseFail, ensureDaemon, postCommand, ERROR_KINDS } from './bridge/client.mjs';
+import { fail as baseFail, ensureDaemon, getHosts, postCommand, ERROR_KINDS } from './bridge/client.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DAEMON_PATH = path.resolve(__dirname, 'bridge/daemon.mjs');
 
 // 编辑专属退出码（其余沿用 client.mjs 的 BASE_EXIT_CODES）
-const EDIT_EXIT_CODES = { need_edit_permission: 6, need_edit_grant: 7 };
+// 007 免链接建档：host_ambiguous/need_landing_url 属用法问题（2）；
+// host_not_authorized 与"需授权域名"同性质（4）。
+const EDIT_EXIT_CODES = {
+  need_edit_permission: 6,
+  need_edit_grant: 7,
+  host_ambiguous: 2,
+  need_landing_url: 2,
+  host_not_authorized: 4,
+};
 const fail = (err) => baseFail(err, EDIT_EXIT_CODES);
 
 // 编辑专属错误分类：扩展回传 error 的 subtype → type/hint/retryable
@@ -67,6 +75,8 @@ const argv = process.argv.slice(2);
 // USAGE_HINT 必须先于解析循环定义：循环里遇到未知旗标就会调 usage()
 const USAGE_HINT = [
   '用法: edit.mjs <链接> new-doc [<md文件>] --name "<标题>"',
+  '     edit.mjs new-doc [<md文件>] --name "<标题>" [--host <已授权域名>]   # 免链接（单域名可省 --host）',
+  '     edit.mjs hosts [--profile <code>]                                # 已授权域名清单',
   '     edit.mjs <链接> append <md文件>',
   '     edit.mjs <链接> insert-after "<标题文本>" <md文件>',
   '     edit.mjs <链接> list-blocks',
@@ -81,7 +91,7 @@ function usage(message) {
   fail({ type: 'usage', subtype: 'bad_args', message, hint: USAGE_HINT });
 }
 
-const FLAGS_WITH_VALUE = new Set(['--profile', '--expect', '--expect-first', '--type', '--limit', '--name']);
+const FLAGS_WITH_VALUE = new Set(['--profile', '--expect', '--expect-first', '--type', '--limit', '--name', '--host']);
 // 默认走纯文本 Markdown 口味粘贴（飞书自己解析转块：表格转原生简单表格而非
 // 异步提交的内嵌电子表格，代码块注释行也不会被误判成标题）。
 // --html-paste：退回 HTML 口味粘贴（万一某租户不支持 md 粘贴解析时用）。
@@ -101,8 +111,29 @@ for (let i = 0; i < argv.length; i++) {
   positionals.push(argv[i]);
 }
 
-const [url, op] = positionals;
-if (!url || !op) usage('缺少参数：需要 <链接> 和 <操作>。');
+// 参数放宽（007）：首个定位参数是 http(s) URL → 旧用法；否则视为省略了链接，
+// 仅 hosts（只读清单）和 new-doc（免链接建档，main 里合成 URL）允许。
+let url = null;
+let op;
+let rest;
+if (positionals[0] && /^https?:\/\//i.test(positionals[0])) {
+  url = positionals[0];
+  op = positionals[1];
+  rest = positionals.slice(2);
+} else {
+  op = positionals[0];
+  rest = positionals.slice(1);
+}
+if (!op) usage('缺少参数：需要 <操作>（hosts / new-doc 之外的操作还需要 <链接>）。');
+if (!url && op !== 'hosts' && op !== 'new-doc') {
+  usage(`操作「${op}」需要 <链接> 作为第一个参数（只有 hosts / new-doc 可以省略）。`);
+}
+// --host 只对免链接的 new-doc 有意义：其他操作需要具体文档 URL，带它必是误用
+if (flags['--host'] && (op !== 'new-doc' || url)) {
+  usage(op === 'new-doc'
+    ? 'new-doc 的 --host 与 <链接> 二选一：给了链接就不要再带 --host。'
+    : `--host 只能配合免链接的 new-doc 使用，操作「${op}」请直接提供文档链接。`);
+}
 
 // 各操作的定位参数与内容文件；anchor 是发给扩展的定位信息
 // expectSummary: replace/delete 的防呆——扩展执行前比对目标块当前内容，对不上报 block_changed
@@ -110,27 +141,29 @@ let anchor = null;
 let mdFile = null;
 switch (op) {
   case 'new-doc':
-    // 新建文档：<链接> 只用来定位在哪个租户/域名下建（网盘首页或任意文档都行）。
+    // 新建文档：<链接> 只用来定位在哪个租户/域名下建（网盘首页或任意文档都行）；
+    // 不给链接则走已授权域名清单免链接建档（main 里合成 URL）。
     // <md文件> 可选，作为新文档初始内容；不给就建一篇空文档。--name 设标题。
-    mdFile = positionals[2] || null;
+    mdFile = rest[0] || null;
     anchor = flags['--name'] ? { name: flags['--name'] } : null;
     break;
   case 'append':
-    mdFile = positionals[2];
+    mdFile = rest[0];
     if (!mdFile) usage('append 需要 <md文件>。');
     break;
   case 'insert-after':
-    if (!positionals[2] || !positionals[3]) usage('insert-after 需要 "<标题文本>" 和 <md文件>。');
-    anchor = { heading: positionals[2] };
-    mdFile = positionals[3];
+    if (!rest[0] || !rest[1]) usage('insert-after 需要 "<标题文本>" 和 <md文件>。');
+    anchor = { heading: rest[0] };
+    mdFile = rest[1];
     break;
+  case 'hosts': // 只读：已授权域名清单（007），main 里直接查 daemon 后退出
   case 'list-blocks':
   case 'probe': // 隐藏命令（开发/实验用）：收集编辑器 DOM 形态，JSON 打到 stdout
     break;
   case 'find-blocks': {
     // 只读检索：在块的完整纯文本上匹配（解决 list-blocks 摘要 80 字盲区 + 长文档全量输出太贵）。
     // 要搜以 -- 开头的内容，用 --regex 加转义绕过参数解析。
-    const query = positionals[2];
+    const query = rest[0];
     if (!query) usage('find-blocks 需要 "<关键词>"。');
     if (flags['--regex']) {
       // 预检旗标必须与扩展端执行完全一致（iu）：u 旗标下未转义的 { 、孤立的 \p 等都是语法错
@@ -157,25 +190,25 @@ switch (op) {
     break;
   }
   case 'replace-block':
-    if (!positionals[2] || !positionals[3]) usage('replace-block 需要 <块ID> 和 <md文件>。');
+    if (!rest[0] || !rest[1]) usage('replace-block 需要 <块ID> 和 <md文件>。');
     if (!flags['--expect']) usage('replace-block 必须带 --expect "<内容摘要>"（取自 list-blocks 输出的 summary，防止改错块）。');
-    anchor = { blockId: positionals[2], expectSummary: flags['--expect'] };
-    mdFile = positionals[3];
+    anchor = { blockId: rest[0], expectSummary: flags['--expect'] };
+    mdFile = rest[1];
     break;
   case 'delete-block':
-    if (!positionals[2]) usage('delete-block 需要 <块ID>。');
+    if (!rest[0]) usage('delete-block 需要 <块ID>。');
     if (!flags['--expect']) usage('delete-block 必须带 --expect "<内容摘要>"（取自 list-blocks 输出的 summary，防止删错块）。');
-    anchor = { blockId: positionals[2], expectSummary: flags['--expect'] };
+    anchor = { blockId: rest[0], expectSummary: flags['--expect'] };
     break;
   case 'insert-after-block':
-    if (!positionals[2] || !positionals[3]) usage('insert-after-block 需要 <块ID> 和 <md文件>。');
-    anchor = { blockId: positionals[2] };
-    mdFile = positionals[3];
+    if (!rest[0] || !rest[1]) usage('insert-after-block 需要 <块ID> 和 <md文件>。');
+    anchor = { blockId: rest[0] };
+    mdFile = rest[1];
     break;
   case 'replace-all':
     // 整篇正文替换（最危险的操作）：--expect-first 必带，扩展执行前比对当前文档
     // 首块内容，对不上报 block_changed，防止把别人刚改过的文档洗掉
-    mdFile = positionals[2];
+    mdFile = rest[0];
     if (!mdFile) usage('replace-all 需要 <md文件>。');
     if (!flags['--expect-first'])
       usage('replace-all 必须带 --expect-first "<首块内容摘要>"（取自 list-blocks 输出第一个块的 summary，防止洗错文档）。');
@@ -313,6 +346,43 @@ async function loadImage(src, baseDir) {
   }
 }
 
+// ==================== 免链接建档：选域名（007） ====================
+
+/**
+ * 在清单里选目标域名：--host 精确匹配 → 唯一简写（子串）匹配 → 报错；
+ * 未带 --host 时仅单域名可自动选。失败走 fail 直接退出，附完整可选清单。
+ */
+function pickDomain(domains, wanted) {
+  const listHint = domains.length
+    ? `可选: ${domains.map((d) => d.host).join(', ')}`
+    : '清单为空：请先在浏览器打开飞书页面 → 扩展侧边栏 → 授权该域名。';
+  if (wanted) {
+    const exact = domains.filter((d) => d.host === wanted);
+    if (exact.length === 1) return exact[0];
+    const partial = domains.filter((d) => d.host.includes(wanted));
+    if (partial.length === 1) return partial[0];
+    fail(
+      partial.length > 1
+        ? {
+            type: 'usage', subtype: 'host_ambiguous',
+            message: `--host ${wanted} 匹配到多个域名: ${partial.map((d) => d.host).join(', ')}`,
+            hint: `换成完整域名。${listHint}`,
+          }
+        : {
+            type: 'usage', subtype: 'host_not_authorized',
+            message: `--host ${wanted} 不在已授权域名清单中。`,
+            hint: `${listHint}；未授权的域名请让用户在该域名页面打开扩展侧边栏点「授权该域名」。`,
+          }
+    );
+  }
+  if (domains.length === 1) return domains[0];
+  fail({
+    type: 'usage', subtype: 'host_ambiguous',
+    message: `有 ${domains.length} 个已授权域名，无法自动选择。`,
+    hint: `加 --host <域名> 指定其一。${listHint}`,
+  });
+}
+
 // ==================== 主流程 ====================
 
 main().catch((e) => {
@@ -326,6 +396,31 @@ main().catch((e) => {
 });
 
 async function main() {
+  // 只读命令：已授权域名清单，查完直接退出（不走 postCommand）
+  if (op === 'hosts') {
+    await ensureDaemon(DAEMON_PATH, fail);
+    const { domains } = await getHosts(flags['--profile'], fail);
+    console.log(JSON.stringify({ ok: true, domains }, null, 2));
+    process.exit(0);
+  }
+
+  // new-doc 免链接（007）：取清单 → 选域名 → 用真实租户 origin 合成 landing URL。
+  // 不能拿基础域硬拼：apex 打不开编辑器上下文（公有云是营销站、私有化未必是网盘 host）。
+  if (op === 'new-doc' && !url) {
+    await ensureDaemon(DAEMON_PATH, fail);
+    const { domains } = await getHosts(flags['--profile'], fail);
+    const picked = pickDomain(domains, flags['--host']);
+    if (!picked.sampleUrl) {
+      fail({
+        type: 'edit', subtype: 'need_landing_url',
+        message: `域名 ${picked.host} 下没有已记录的租户入口，也没开着该域名的标签页。`,
+        hint: '这一次请喂一个该域名下的文档/网盘链接（旧用法 edit.mjs <链接> new-doc …），或让用户先在浏览器打开一个该域名页面（或重新授权一次该域名）后重试。',
+      });
+    }
+    url = `${picked.sampleUrl}/drive/me/`;
+    process.stderr.write(`… 使用已授权域名 ${picked.host}（${picked.sampleUrl}）建档\n`);
+  }
+
   let mdPaste = !flags['--html-paste'];
   if (contentMd && /!\[[^\]]*\]\(/.test(contentMd)) {
     const { md, embedded } = await embedImages(contentMd, path.dirname(path.resolve(mdFile)));

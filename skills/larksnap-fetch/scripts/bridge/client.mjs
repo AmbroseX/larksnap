@@ -34,6 +34,7 @@ export const BASE_EXIT_CODES = {
   bridge_request_failed: 5,
   extension_not_connected: 5,
   extension_outdated: 5,
+  extension_timeout: 5,
   signature_invalid: 5,
   // 其余（export_failed / write_failed / no_result / unexpected …）→ 1
 };
@@ -67,6 +68,11 @@ export const ERROR_KINDS = {
     type: 'usage',
     hint: '加 --profile <code> 指定用哪个浏览器 profile（code 见扩展弹窗，可点 Copy 复制），然后重跑本命令。',
     retryable: false,
+  },
+  extension_timeout: {
+    type: 'bridge',
+    hint: '点一下扩展图标唤醒后台 Service Worker，然后重跑本命令。',
+    retryable: true,
   },
   export_failed: {
     type: 'export',
@@ -225,6 +231,74 @@ export async function ensureDaemon(daemonPath, failFn) {
     message: 'daemon 启动超时',
     hint: '查看 ~/.larksnap/daemon.log；若端口 19925 被占用，设环境变量 LARKSNAP_PORT 换端口后重跑本命令。',
     retryable: true,
+  });
+}
+
+// ==================== 已授权域名清单（GET /hosts，007） ====================
+
+/**
+ * 取已授权域名清单。成功返回 { domains: DomainEntry[] }；
+ * 一切失败（网络/签名/业务错误）走 failFn 按 subtype 收口，本函数不返回错误。
+ * @param {string|undefined} profile 多浏览器 profile 时指定其一
+ * @param {(err: object) => never} failFn
+ */
+export function getHosts(profile, failFn) {
+  return new Promise((resolve) => {
+    const qs = profile ? `?profile=${encodeURIComponent(profile)}` : '';
+    const req = http.get(
+      {
+        host: HOST,
+        port: PORT,
+        path: `/hosts${qs}`,
+        headers: {
+          [AUTH_HEADER]: '1',
+          // 签名只覆盖 pathname（daemon 验签前已剥 query），method=GET、body 空
+          [SIG_HEADER]: makeSigHeader(getSecret(), 'GET', '/hosts', ''),
+        },
+      },
+      (res) => {
+        let acc = '';
+        res.setEncoding('utf8');
+        res.on('data', (c) => (acc += c));
+        res.on('end', () => {
+          let body;
+          try {
+            body = JSON.parse(acc);
+          } catch {
+            failFn({
+              type: 'bridge',
+              subtype: res.statusCode === 401 ? 'signature_invalid' : 'bridge_request_failed',
+              message: `daemon 响应异常（HTTP ${res.statusCode}）`,
+              hint: ERROR_KINDS.signature_invalid.hint,
+              retryable: false,
+            });
+            return;
+          }
+          if (!body.ok) {
+            const subtype = body.error?.subtype || 'bridge_request_failed';
+            const kind = ERROR_KINDS[subtype] || { type: 'bridge', retryable: true };
+            failFn({
+              type: kind.type,
+              subtype,
+              message: body.error?.message || '获取域名清单失败',
+              hint: kind.hint,
+              retryable: kind.retryable ?? false,
+            });
+            return;
+          }
+          resolve({ domains: body.domains || [] });
+        });
+      }
+    );
+    req.on('error', (e) => {
+      failFn({
+        type: 'bridge',
+        subtype: 'bridge_request_failed',
+        message: `请求 daemon 失败: ${e.message}`,
+        hint: '直接重跑本命令；仍失败则查看 ~/.larksnap/daemon.log。',
+        retryable: true,
+      });
+    });
   });
 }
 

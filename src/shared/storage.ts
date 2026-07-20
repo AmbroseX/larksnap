@@ -131,3 +131,28 @@ export async function removeTrustedDomain(origin: string): Promise<void> {
   const list = await getTrustedDomains();
   await saveConfig({ trustedDomains: list.filter((o) => o !== origin) });
 }
+
+// ==================== 授权时记下的真实租户 origin ====================
+// new-doc 免链接建档用：授权那一刻用户所在页面的 origin（含租户子域，授权
+// pattern 里被剥掉的那部分）。随授权写入、随撤销删除，老配置没有按空 map。
+
+/** 读取全部「基础域 → 真实租户 origin」记录 */
+export async function getTrustedOrigins(): Promise<Record<string, string>> {
+  const config = await getConfig();
+  return config.trustedOrigins ?? {};
+}
+
+/** 记录某基础域的真实租户 origin（同基础域覆盖为最近一次） */
+export async function recordTrustedOrigin(base: string, origin: string): Promise<void> {
+  if (!base || !origin) return;
+  const map = await getTrustedOrigins();
+  await saveConfig({ trustedOrigins: { ...map, [base]: origin } });
+}
+
+/** 撤销授权时删除对应基础域的 origin 记录（零残留） */
+export async function removeTrustedOrigin(base: string): Promise<void> {
+  const map = await getTrustedOrigins();
+  if (!(base in map)) return;
+  const { [base]: _removed, ...rest } = map;
+  await saveConfig({ trustedOrigins: rest });
+}

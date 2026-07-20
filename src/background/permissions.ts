@@ -1,9 +1,10 @@
 import {
   addTrustedDomain,
   removeTrustedDomain,
+  removeTrustedOrigin,
   getTrustedDomains,
 } from '../shared/storage';
-import { permissionPattern } from '../shared/feishu-host';
+import { baseFromPattern, permissionPattern } from '../shared/feishu-host';
 
 /**
  * 私有化域名的 host 权限管理（配合 `optional_host_permissions`，§4.4）。
@@ -41,6 +42,9 @@ export async function revokePermission(pattern: string): Promise<boolean> {
     /* 公有云静态权限无法 remove，忽略 */
   }
   await removeTrustedDomain(pattern);
+  // 授权时记的真实租户 origin 一并清掉（007），撤销零残留
+  const base = baseFromPattern(pattern);
+  if (base) await removeTrustedOrigin(base);
   return true;
 }
 

@@ -19,6 +19,7 @@ import type {
 import { CONTENT_MSG } from '../shared/constants';
 import { ensureI18n } from '../shared/i18n';
 import { detectDocFromUrl, stripSiteSuffix } from '../content/feishu-detect';
+import { buildDomainList } from './domain-list';
 import { hasPermissionForHost } from './permissions';
 import { setContentTab } from './feishu-proxy';
 import { safeName, setDownloadSink } from './download';
@@ -40,7 +41,8 @@ const WS_URL = `ws://127.0.0.1:${PORT}/ext`;
 // welcome 里对不上时置 protocolMismatch 提示用户更新（不硬断，避免升级期间全瘫）。
 // v2: 支持编辑任务（kind='edit'，daemon 只对 proto>=2 的扩展派发编辑任务）
 // v3: 扩展可主动发起视频下载（video-job），daemon 本机跑 yt-dlp 并主动推进度回来
-const PROTOCOL_VERSION = 3;
+// v4: daemon 可发 list-domains（已授权域名清单），扩展回 domains-result
+const PROTOCOL_VERSION = 4;
 const KEEPALIVE_ALARM = 'larksnap-bridge-keepalive';
 const RECONNECT_BASE = 2000;
 const RECONNECT_MAX = 5000;
@@ -395,6 +397,20 @@ async function onMessage(raw: string): Promise<void> {
     if (!cb) return;
     if (ev.type !== 'video-progress') videoPending.delete(ev.id);
     cb(ev);
+    return;
+  }
+  // 已授权域名清单（v4，007）：只读查询，不带 url。异常也要回包，否则 daemon 空等 10s 超时。
+  if (msg.type === 'list-domains' && msg.id) {
+    const id = msg.id;
+    try {
+      reply(id, { type: 'domains-result', domains: await buildDomainList() });
+    } catch (err) {
+      reply(id, {
+        type: 'domains-result',
+        domains: [],
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
     return;
   }
   if (msg.type === 'job' && msg.id && msg.url) {

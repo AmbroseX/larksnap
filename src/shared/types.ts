@@ -133,6 +133,12 @@ export interface ExtensionConfig {
   diagnosticIncludeSnapshot: boolean;
   /** 已运行时授权的私有化域名 origin 列表（如 https://x.私有化租户.com） */
   trustedDomains: string[];
+  /**
+   * 授权那一刻记下的真实租户 origin（new-doc 免链接建档定位用）。
+   * 键 = 基础域（与 trustedDomains 的 pattern 对齐），值 = 'https://<真实租户 host>'。
+   * 随授权写入、随撤销删除；老授权没有此记录 → 走已打开标签兜底。
+   */
+  trustedOrigins?: Record<string, string>;
   /** 网页复制（任意网页转 Markdown / 解锁 / 自动复制） */
   webcopy: WebCopyConfig;
   /**

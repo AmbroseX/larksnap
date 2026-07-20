@@ -17,8 +17,8 @@ import fs from 'node:fs';
 import crypto from 'node:crypto';
 import { EventEmitter } from 'node:events';
 
-export const DAEMON_VERSION = '1.5.2'; // 1.5.1: YouTube nsig 解题启用 JS 运行时；1.5.2: video-reveal 在文件管理器里显示下载产物
-export const PROTOCOL_VERSION = 3; // WS 握手用：hello/welcome 双向携带，不匹配时提示更新。v2: kind='edit'；v3: 扩展可主动发 video-job，daemon 主动推进度
+export const DAEMON_VERSION = '1.6.0'; // 1.6.0: GET /hosts 已授权域名清单（new-doc 免链接）
+export const PROTOCOL_VERSION = 4; // WS 握手用：hello/welcome 双向携带，不匹配时提示更新。v2: kind='edit'；v3: 扩展可主动发 video-job，daemon 主动推进度；v4: daemon 可发 list-domains，扩展回 domains-result
 export const HOST = '127.0.0.1';
 export const PORT = Number(process.env.LARKSNAP_PORT || 19925);
 export const PING_URL = `http://${HOST}:${PORT}/ping`;
@@ -132,6 +132,16 @@ export class WSConnection extends EventEmitter {
     socket.on('data', (chunk) => this._onData(chunk));
     socket.on('close', () => this.emit('close'));
     socket.on('error', () => this.emit('close'));
+    // http.Server 升级出的 socket 是 allowHalfOpen：对端进程被杀只发 FIN 时
+    // 只触发 'end' 不触发 'close'，连接会泄漏到心跳超时（~30s）才回收。
+    // 收到 FIN 就把我方也关掉，让 'close' 立即触发。
+    socket.on('end', () => {
+      try {
+        socket.end();
+      } catch {
+        /* 忽略 */
+      }
+    });
   }
 
   _onData(chunk) {
