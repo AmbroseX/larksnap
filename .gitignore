@@ -13,5 +13,16 @@ ref/
 
 # 内部资料（草稿/参考PRD）
 docs/internal/
+docs/security/
+docs/plans/internal/
+docs/research/internal/
 review.md
 .playwright-mcp/
+
+# 逆向与第三方平台抓取调研（ToS/版权灰色，不进公开仓库）
+docs/research/2026-07-09-飞书新建文档接口调研.md
+docs/research/2026-07-09-chrome扩展核心实现逆向.md
+docs/research/2026-07-09-参考扩展解包分析.md
+docs/research/2026-07-08-bilibili视频下载调研.md
+docs/plans/2026-07-09-飞书转公众号复刻.md
+docs/plans/2026-07-09-飞书转小红书卡片.md
