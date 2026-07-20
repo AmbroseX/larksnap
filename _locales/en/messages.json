@@ -1,10 +1,10 @@
 {
   "appName": {
-    "message": "LarkSnap · Feishu Document Exporter",
+    "message": "LarkSnap · Doc Export · Web Clipper · Snapshot",
     "description": "Extension name (management page and icon hover title)"
   },
   "appDesc": {
-    "message": "One-click export of Feishu/Lark docs to Markdown / PDF / HTML with batch attachment download and offline cache; convert any web page to Markdown, remove copy restrictions, and auto-copy selections.",
+    "message": "Export Feishu/Lark docs to Markdown/PDF/HTML with attachments, and write Markdown back; turn any page (incl. Xiaohongshu) into Markdown, full-page screenshot, AI summary, unlock copy, copy links; download videos from Bilibili, YouTube, Douyin & TikTok.",
     "description": "Extension description (store and management page)"
   },
   "cmdOpenPanel": {
