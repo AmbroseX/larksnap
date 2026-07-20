@@ -1,8 +1,8 @@
-# LarkSnap · Feishu / Lark Doc Exporter
+# LarkSnap · Doc Export · Web Clipper · Snapshot
 
 [简体中文](README.md) | **English**
 
-> Chrome extension: export Feishu / Lark docs to **Markdown / PDF / HTML** in one click, batch-download attachments, cache docs offline; convert **any webpage to Markdown** and remove copy restrictions.
+> Chrome extension: export Feishu / Lark docs to **Markdown / PDF / HTML** in one click, batch-download attachments, cache offline, and **write Markdown back** into docs; convert **any webpage** (incl. Xiaohongshu notes) to Markdown, full-page screenshot, AI summary, remove copy restrictions; download videos from **Bilibili / YouTube / Douyin / TikTok**.
 
 Zero config, fully client-side, nothing leaves your browser. Works with **self-hosted enterprise Feishu domains**. No open-platform app, no API permission requests — it reuses the cookies already in your browser and Feishu's own internal web APIs.
 

@@ -1,8 +1,8 @@
-# LarkSnap · 飞书文档导出助手
+# LarkSnap · 文档导出 · 网页剪藏 · 截图总结
 
 **简体中文** | [English](README.en.md)
 
-> Chrome 扩展：在飞书 / Lark 文档页一键导出 **Markdown / PDF / HTML**、批量下载附件、离线缓存；在任意网页上**一键转 Markdown**、解除复制限制。
+> Chrome 扩展：飞书 / Lark 文档一键导出 **Markdown / PDF / HTML**、批量下载附件、离线缓存，还能把 Markdown **写回文档**；任意网页（含小红书笔记）**一键转 Markdown**、整页截图、AI 总结、解除复制限制；下载 **B 站 / YouTube / 抖音 / TikTok** 视频。
 
 零配置、纯客户端、内容不外发，**兼容企业私有化自建域名**。不用去开放平台建应用、申请 API 权限 —— 直接复用浏览器里已登录的 Cookie 和飞书网页自身的内部接口。
 
