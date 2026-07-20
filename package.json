@@ -1,6 +1,6 @@
 {
   "name": "larksnap",
-  "version": "0.5.0",
+  "version": "0.5.1",
   "private": true,
   "description": "飞书 / Lark 文档导出浏览器扩展（MV3）—— 持登录态直导私有化部署与「官方导出已关闭」的文档，把 Markdown 写回飞书文档；任意网页转 Markdown、整页截图、AI 总结、解除复制、下载视频，并可桥接 Claude Code / CLI 落到本地目录",
   "keywords": [
