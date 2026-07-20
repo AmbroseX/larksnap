@@ -570,7 +570,6 @@ export const en: Dict = {
       waiting: 'Waiting for server-side rendering...',
       downloading: 'Downloading PDF...',
       done: 'PDF export complete',
-      closed: 'Official PDF export is disabled for this tenant/document; cannot export PDF',
       failed: 'PDF export failed: {msg}',
       viaMarkdown: 'Official PDF unavailable; rendering PDF from document content...',
       rendering: 'Rendering PDF...',

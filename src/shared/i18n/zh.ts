@@ -546,7 +546,6 @@ export const zh = {
       waiting: '正在等待服务端渲染...',
       downloading: '正在下载 PDF...',
       done: 'PDF 导出完成',
-      closed: '该租户/文档已关闭官方 PDF 导出，无法导出 PDF',
       failed: 'PDF 导出失败：{msg}',
       viaMarkdown: '官方 PDF 不可用，改用正文自渲染生成 PDF...',
       rendering: '正在渲染 PDF...',
