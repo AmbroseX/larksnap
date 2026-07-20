@@ -47,45 +47,145 @@ export async function stitch(req: ShotStitchRequest): Promise<ShotStitchResult> 
     reportProgress(i + 1, shots.length);
   }
 
-  const dataUrl = format === 'pdf' ? await canvasToA4Pdf(canvas) : canvas.toDataURL('image/png');
+  // 截图 PDF 仍经 sendMessage 回传 SW，用 JPEG 控体积、别撞 64MiB
+  const dataUrl =
+    format === 'pdf' ? await canvasToA4Pdf(canvas, { jpeg: true }) : canvas.toDataURL('image/png');
   return { dataUrl, truncated };
 }
 
 /** canvas 高度安全上限，供其他离屏渲染（md→pdf）复用 */
 export const MAX_PDF_CANVAS_HEIGHT = MAX_CANVAS_HEIGHT;
 
-/** 把长图 canvas 按 A4 页高切成多页 PDF（不做单张超长页，阅读器难看且超长会渲染失败） */
-export async function canvasToA4Pdf(canvas: HTMLCanvasElement): Promise<string> {
+/** 要独占一页的纵向区间（画布像素），如画板图：切页避开它，不跨页切断 */
+export interface OwnPageRegion {
+  top: number;
+  bottom: number;
+}
+
+/**
+ * 把长图 canvas 按 A4 页高切成多页 PDF（不做单张超长页，阅读器难看且超长会渲染失败）。
+ *
+ * 切页规则：
+ * - `opts.ownPageRegions`（画板图等）各自独占一页，超过一页高就整体缩小装进一页并居中；
+ * - 普通内容的切线尽量落在"整行空白"处（向上回看最多 1/3 页），避免把一行文字拦腰切成两半；
+ * - 每页图默认 **PNG（无损，清晰）**——md→pdf 走 blob URL 下载，没有 64MiB 限制。
+ *   `opts.jpeg=true` 用 JPEG（0.85）：仅给仍经 sendMessage 回传的截图 PDF 用，靠有损压缩
+ *   把体积压到 64MiB 消息上限以下（代价是白底细线会起毛边）。
+ */
+export async function canvasToA4Pdf(
+  canvas: HTMLCanvasElement,
+  opts: { jpeg?: boolean; ownPageRegions?: OwnPageRegion[] } = {}
+): Promise<string> {
   const { jsPDF } = await import('jspdf');
+  const [mime, fmt, quality] = opts.jpeg
+    ? (['image/jpeg', 'JPEG', 0.85] as const)
+    : (['image/png', 'PNG', undefined] as const);
   const pdf = new jsPDF({ orientation: 'portrait', unit: 'pt', format: 'a4' });
   const pageW = pdf.internal.pageSize.getWidth();
   const pageH = pdf.internal.pageSize.getHeight();
+  // 每页上下留白（≈1cm）。左右不留：正文渲染时自带水平内边距，已烙在长图里
+  const marginY = 28;
+  const usableH = pageH - marginY * 2;
 
   const imgW = canvas.width;
   const imgH = canvas.height;
-  // 长图按 A4 宽等比映射后，单页能容纳的原图像素高
-  const sliceHpx = Math.max(1, Math.floor((pageH / pageW) * imgW));
+  // 长图按 A4 宽等比映射后，单页内容区能容纳的原图像素高
+  const sliceHpx = Math.max(1, Math.floor((usableH / pageW) * imgW));
 
+  // 独占页区间：夹紧到画布内、按位置排序、重叠的合并
+  const regions: OwnPageRegion[] = [];
+  for (const r of [...(opts.ownPageRegions ?? [])].sort((a, b) => a.top - b.top)) {
+    const top = Math.max(0, Math.floor(r.top));
+    const bottom = Math.min(imgH, Math.ceil(r.bottom));
+    if (bottom <= top) continue;
+    const last = regions[regions.length - 1];
+    if (last && top <= last.bottom) last.bottom = Math.max(last.bottom, bottom);
+    else regions.push({ top, bottom });
+  }
+
+  const src = canvas.getContext('2d');
   const slice = document.createElement('canvas');
   slice.width = imgW;
   const sctx = slice.getContext('2d');
   if (!sctx) throw new Error('无法创建切片画布上下文');
 
-  let y = 0;
   let firstPage = true;
-  while (y < imgH) {
-    const h = Math.min(sliceHpx, imgH - y);
+  /** 把长图 [top, top+h) 段落成一页；独占页整体装进一页并居中，普通页顶格铺 A4 宽 */
+  const addSlice = (top: number, h: number, ownPage: boolean): void => {
     slice.height = h;
     sctx.clearRect(0, 0, imgW, h);
-    sctx.drawImage(canvas, 0, y, imgW, h, 0, 0, imgW, h);
+    sctx.drawImage(canvas, 0, top, imgW, h, 0, 0, imgW, h);
     if (!firstPage) pdf.addPage();
-    // 该切片按 A4 宽铺满，高度等比（末页按剩余高度收尾）
-    const drawH = (h / imgW) * pageW;
-    pdf.addImage(slice.toDataURL('image/png'), 'PNG', 0, 0, pageW, drawH);
     firstPage = false;
+    let drawW = pageW;
+    let drawH = (h / imgW) * pageW;
+    if (ownPage && drawH > usableH) {
+      drawW = (usableH / drawH) * pageW;
+      drawH = usableH;
+    }
+    const x = ownPage ? (pageW - drawW) / 2 : 0;
+    // 普通页顶着上边距铺；独占页在整页里垂直居中（不会越进边距，drawH ≤ usableH）
+    const yPt = ownPage ? (pageH - drawH) / 2 : marginY;
+    pdf.addImage(slice.toDataURL(mime, quality), fmt, x, yPt, drawW, drawH);
+  };
+
+  let y = 0;
+  let ri = 0;
+  while (y < imgH) {
+    while (ri < regions.length && regions[ri].bottom <= y) ri++;
+    const reg = ri < regions.length ? regions[ri] : null;
+    // 进入独占页区间：这一段单独出一页
+    if (reg && y >= reg.top) {
+      addSlice(y, reg.bottom - y, true);
+      y = reg.bottom;
+      ri++;
+      continue;
+    }
+    // 普通内容：切到页高、下一个独占区间或文末，且切线尽量落在空白行
+    const boundary = reg ? reg.top : imgH;
+    let h = Math.min(sliceHpx, boundary - y);
+    if (y + h < boundary) h = cleanCutHeight(src, imgW, y, h);
+    addSlice(y, h, false);
     y += h;
   }
   return pdf.output('datauristring');
+}
+
+/**
+ * 在理想切点附近找"整行空白"的位置收页：从切点向上回看最多 1/3 页，找到整行
+ * 接近白/透明的像素行就在那切（避免拦腰切文字）；找不到（密排内容/深色背景截图）
+ * 按原切点硬切。读像素失败也硬切，绝不因此丢页。
+ */
+function cleanCutHeight(
+  src: CanvasRenderingContext2D | null,
+  imgW: number,
+  top: number,
+  idealH: number
+): number {
+  if (!src) return idealH;
+  const lookback = Math.min(Math.floor(idealH / 3), idealH - 1);
+  if (lookback < 8) return idealH;
+  let strip: ImageData;
+  try {
+    strip = src.getImageData(0, top + idealH - lookback, imgW, lookback);
+  } catch {
+    return idealH;
+  }
+  const d = strip.data;
+  const stepX = Math.max(1, Math.floor(imgW / 400));
+  for (let row = lookback - 1; row >= 0; row--) {
+    let blank = true;
+    for (let x = 0; x < imgW; x += stepX) {
+      const i = (row * imgW + x) * 4;
+      // 非空白 = 不透明且不接近纯白（同画板裁边的判据）
+      if (d[i + 3] > 8 && !(d[i] > 246 && d[i + 1] > 246 && d[i + 2] > 246)) {
+        blank = false;
+        break;
+      }
+    }
+    if (blank) return idealH - lookback + row + 1;
+  }
+  return idealH;
 }
 
 function loadImage(src: string): Promise<HTMLImageElement> {

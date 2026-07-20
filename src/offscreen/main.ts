@@ -90,6 +90,17 @@ async function htmlToPdf(req: DocToPdfRequest): Promise<DocToPdfResult> {
     const heightCss = stage.scrollHeight || stage.offsetHeight || 1;
     // 选缩放系数使画布高不超上限：短文放大到 2 倍更清晰，超长文缩到 <1 也要装下整篇
     const scale = Math.min(2, MAX_PDF_CANVAS_HEIGHT / heightCss);
+
+    // 排版定稿后量出每块画板（wb-own-page）在长图里的纵向区间（换算成画布像素），
+    // 切页时让它们各自独占一页，避免画板跨页被拦腰切断
+    const stageTop = stage.getBoundingClientRect().top;
+    const ownPageRegions = Array.from(
+      stage.querySelectorAll<HTMLElement>('img.wb-own-page')
+    ).map((img) => {
+      const r = img.getBoundingClientRect();
+      return { top: (r.top - stageTop) * scale, bottom: (r.bottom - stageTop) * scale };
+    });
+
     const canvas = await html2canvas(stage, {
       scale,
       backgroundColor: '#ffffff',
@@ -97,8 +108,17 @@ async function htmlToPdf(req: DocToPdfRequest): Promise<DocToPdfResult> {
       logging: false,
       windowWidth: req.cssWidth,
     });
-    const dataUrl = await canvasToA4Pdf(canvas);
-    return { dataUrl, truncated: scale < 1 };
+    const dataUrl = await canvasToA4Pdf(canvas, { ownPageRegions });
+    const truncated = scale < 1;
+
+    // 桥接模式：产物要回传给 CC（native host），blob URL 出不了浏览器，只能回传 dataUrl。
+    if (req.bridge) return { dataUrl, truncated };
+
+    // 常规模式：offscreen 有 URL.createObjectURL（SW 没有），把整份 PDF 转成 blob URL，
+    // 只回传这个短字符串，SW 再用 chrome.downloads 落盘——整份 PDF 不进 sendMessage，绕过
+    // 64MiB 消息上限。（offscreen 无 chrome.downloads 权限，下载只能由 SW 做。）
+    const blob = await (await fetch(dataUrl)).blob();
+    return { blobUrl: URL.createObjectURL(blob), truncated };
   } finally {
     stage.remove();
   }

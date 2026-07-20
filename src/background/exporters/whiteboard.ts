@@ -195,6 +195,61 @@ function extractWhiteboardsInPage(
     return { restore, targetW: Math.round(baseCanvasW * scale) };
   };
 
+  /**
+   * 裁掉画板四周的空白后转 PNG dataURL。
+   *
+   * 画板 canvas 是"整块画布"，真正画的内容往往只占中间一块，四周是空白——透明或
+   * **不透明的纯白底**（引擎先铺白再画）。不裁的话，导出到 A4 页宽时内容被这圈空白
+   * 挤成中间一小块、又小又糊。这里把"透明或接近纯白"都当空白，按内容像素求包围盒、
+   * 留一点边距裁出内容区，导出时才能铺满页宽、清晰。读像素失败（跨源污染等）或本就
+   * 占满时，退回原图不裁。
+   */
+  const toCroppedDataUrl = (canvas: HTMLCanvasElement): string => {
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return canvas.toDataURL('image/png');
+    const W = canvas.width;
+    const H = canvas.height;
+    const { data } = ctx.getImageData(0, 0, W, H); // 跨源污染会抛，交给上层 catch
+    // 大画布抽样求包围盒：步进扫描够快，配合边距无需精确到 1px
+    const step = Math.max(1, Math.floor(Math.min(W, H) / 1000));
+    let minX = W;
+    let minY = H;
+    let maxX = -1;
+    let maxY = -1;
+    for (let y = 0; y < H; y += step) {
+      for (let x = 0; x < W; x += step) {
+        const i = (y * W + x) * 4;
+        // 内容像素 = 不透明且不接近纯白（>246 视为白底/抗锯齿边，算空白）
+        if (
+          data[i + 3] > 8 &&
+          !(data[i] > 246 && data[i + 1] > 246 && data[i + 2] > 246)
+        ) {
+          if (x < minX) minX = x;
+          if (x > maxX) maxX = x;
+          if (y < minY) minY = y;
+          if (y > maxY) maxY = y;
+        }
+      }
+    }
+    if (maxX < minX || maxY < minY) return canvas.toDataURL('image/png'); // 全空白，别裁
+    const pad = Math.round(Math.max(W, H) * 0.01);
+    minX = Math.max(0, minX - pad);
+    minY = Math.max(0, minY - pad);
+    maxX = Math.min(W - 1, maxX + pad + step);
+    maxY = Math.min(H - 1, maxY + pad + step);
+    const cw = maxX - minX + 1;
+    const ch = maxY - minY + 1;
+    // 内容本就基本占满，裁不掉多少：省一次绘制
+    if (cw >= W * 0.95 && ch >= H * 0.95) return canvas.toDataURL('image/png');
+    const out = document.createElement('canvas');
+    out.width = cw;
+    out.height = ch;
+    const octx = out.getContext('2d');
+    if (!octx) return canvas.toDataURL('image/png');
+    octx.drawImage(canvas, minX, minY, cw, ch, 0, 0, cw, ch);
+    return out.toDataURL('image/png');
+  };
+
   const grab = async (blockId: string): Promise<string | null> => {
     const el = await scrollUntilFound(blockId);
     if (!el) return null;
@@ -206,7 +261,7 @@ function extractWhiteboardsInPage(
     const baseW = base.width;
     let baseUrl: string | null = null;
     try {
-      baseUrl = base.toDataURL('image/png');
+      baseUrl = toCroppedDataUrl(base);
     } catch {
       return null;
     }
@@ -219,7 +274,7 @@ function extractWhiteboardsInPage(
       const hi = await waitGrownStable(el, baseW);
       if (hi) {
         try {
-          hiUrl = hi.toDataURL('image/png');
+          hiUrl = toCroppedDataUrl(hi);
         } catch {
           hiUrl = null;
         }

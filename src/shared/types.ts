@@ -401,12 +401,24 @@ export interface DocToPdfRequest {
   html: string;
   /** 渲染容器的 CSS 宽度（px），按 A4 宽取值 */
   cssWidth: number;
+  /**
+   * 桥接模式（产物要回传给 CC）。为 true 时 offscreen 回传整份 PDF 的 dataUrl 交给 sink；
+   * 为 false 时 offscreen 回传 blob URL（短字符串），由 SW 落盘，避免整份 PDF 塞回
+   * sendMessage 撞 64MiB 上限。
+   */
+  bridge: boolean;
 }
 
 /** offscreen → SW：md→pdf 渲染结果 */
 export interface DocToPdfResult {
-  /** 多页 PDF 的 dataURL */
-  dataUrl: string;
+  /**
+   * 常规模式：多页 PDF 的 blob URL（短字符串）。offscreen 无 chrome.downloads 权限，
+   * 由 SW 用它落盘；整份 PDF 不进 sendMessage，绕过 64MiB 消息上限。
+   * ⚠️ 随 offscreen 文档关闭而失效，SW 必须在 offscreen 存活时下载。
+   */
+  blobUrl?: string;
+  /** 桥接模式：多页 PDF 的 dataURL（要回传给 CC，blob URL 出不了浏览器） */
+  dataUrl?: string;
   /** 文档过长、渲染时缩小以塞进画布上限（清晰度下降）时为 true */
   truncated?: boolean;
 }

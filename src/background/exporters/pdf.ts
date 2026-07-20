@@ -13,7 +13,7 @@ import { blocksToMarkdown } from '../convert/markdown';
 import { downloadImageDataUrls } from '../image-map';
 import { extractWhiteboards } from './whiteboard';
 import { withOffscreen } from '../offscreen';
-import { downloadBase64, downloadDataUrl, safeName } from '../download';
+import { downloadBase64, downloadDataUrl, safeName, isDownloadBridged } from '../download';
 import { downloadMedia } from '../feishu-proxy';
 import { extFromMime, fileDownloadUrls } from '../media-util';
 
@@ -28,6 +28,31 @@ const TRANSPARENT_PNG =
  * 导出为 PDF —— 先走飞书官方导出任务（服务端渲染，质量最稳，§5.2）；
  * 官方关闭 / 未登录（公开文档匿名）时**回退 md→pdf**：解码正文自渲染，离屏截图切成多页 PDF。
  */
+/** 预解码结果：正文已转 Markdown，附带 resolved，供自渲染路径复用（不再二次拉取） */
+type PreDecoded = ReturnType<typeof blocksToMarkdown> & {
+  resolved: Awaited<ReturnType<typeof resolveObjToken>>;
+};
+
+/** 拉正文并解码成 Markdown（失败抛出，供自渲染路径把错误如实报给用户） */
+async function decodeDoc(doc: DocInfo): Promise<PreDecoded> {
+  const resolved = await resolveObjToken(doc);
+  const cv = await fetchClientVars(resolved);
+  const data = (cv.data ?? {}) as Record<string, unknown>;
+  return { resolved, ...blocksToMarkdown(data, resolved.objToken) };
+}
+
+/**
+ * 探测文档是否含画板用：解码失败（未登录读不到私有文档等）返回 null，
+ * 让上层退回官方导出，沿用官方那条的登录/降级处理。
+ */
+async function tryDecode(doc: DocInfo): Promise<PreDecoded | null> {
+  try {
+    return await decodeDoc(doc);
+  } catch {
+    return null;
+  }
+}
+
 export async function exportPdf(doc: DocInfo): Promise<Response> {
   await reportProgress('pdf', 'running', t('progress.pdf.creating'), 15);
 
@@ -35,8 +60,15 @@ export async function exportPdf(doc: DocInfo): Promise<Response> {
   // 并复用 download/all → preview_tpl3 的兼容候选链。
   if (doc.docType === 'file') return downloadCloudFileAsPdf(doc);
 
+  // 先解码正文探测画板：飞书官方 PDF 把画板渲染成小预览图（模糊/太小），含画板时改走
+  // 自渲染——与 Markdown 同源的高清画板抓图，画板才清晰。无画板走官方导出（版式最还原）。
+  const pre = await tryDecode(doc);
+  if (pre && pre.whiteboards.length > 0) {
+    return exportPdfViaDecode(doc, undefined, pre);
+  }
+
   try {
-    const resolved = await resolveObjToken(doc);
+    const resolved = pre?.resolved ?? (await resolveObjToken(doc));
     await reportProgress('pdf', 'running', t('progress.pdf.waiting'), 50);
 
     const result = await runExportTask(
@@ -57,12 +89,13 @@ export async function exportPdf(doc: DocInfo): Promise<Response> {
     await reportProgress('pdf', 'success', t('progress.pdf.done'), 100);
     return { success: true };
   } catch (err) {
-    // 官方关闭 / 未登录：回退 md→pdf（解码正文自渲染）。未登录时带 hint，解码也读不到才提示登录。
+    // 官方关闭 / 未登录：回退 md→pdf（解码正文自渲染）。复用 pre 免二次拉取；
+    // 未登录时带 hint，解码也读不到才提示登录。
     if (err instanceof ExportDisabledError) {
-      return exportPdfViaDecode(doc);
+      return exportPdfViaDecode(doc, undefined, pre ?? undefined);
     }
     if (err instanceof NotLoggedInError) {
-      return exportPdfViaDecode(doc, err.message);
+      return exportPdfViaDecode(doc, err.message, pre ?? undefined);
     }
     const msg = err instanceof Error ? err.message : String(err);
     await reportProgress('pdf', 'error', t('progress.pdf.failed', { msg }));
@@ -95,16 +128,16 @@ async function downloadCloudFileAsPdf(doc: DocInfo): Promise<Response> {
  * md→pdf 回退：解码 client_vars → Markdown → HTML，图片/画板内联，
  * 交离屏页渲染截图切成多页 PDF。与 Markdown/HTML 导出同源（自渲染，不依赖官方导出）。
  */
-async function exportPdfViaDecode(doc: DocInfo, loginHint?: string): Promise<Response> {
+async function exportPdfViaDecode(
+  doc: DocInfo,
+  loginHint?: string,
+  pre?: PreDecoded
+): Promise<Response> {
   try {
     await reportProgress('pdf', 'running', t('progress.pdf.viaMarkdown'), 20);
-    const resolved = await resolveObjToken(doc);
-    const cv = await fetchClientVars(resolved);
-    const data = (cv.data ?? {}) as Record<string, unknown>;
-    const { markdown, images, sheetBlocks, whiteboards } = blocksToMarkdown(
-      data,
-      resolved.objToken
-    );
+    // pre 有则复用（探测阶段已拉过正文），没有才现拉现解码
+    const decoded = pre ?? (await decodeDoc(doc));
+    const { resolved, markdown, images, sheetBlocks, whiteboards } = decoded;
 
     // 解码也一无所获（多半是私有文档 + 未登录读不到）：官方那条来的就提示登录，别出空 PDF
     if (
@@ -184,14 +217,27 @@ async function exportPdfViaDecode(doc: DocInfo, loginHint?: string): Promise<Res
     }
     for (const ref of whiteboards) {
       const url = wbMap[ref.blockId];
-      if (url) body = body.split(`feishu-whiteboard-block://${ref.blockId}`).join(url);
+      if (!url) continue;
+      // 画板图强制铺满页宽（默认只有 max-width，不会主动放大）：抓的是高清大图，
+      // 放大到页宽细节才看得清；普通配图不动，保持原始大小。
+      // wb-own-page 类：离屏切页时让画板独占一页（不跨页切断），见 offscreen/main.ts
+      body = body
+        .split(`src="feishu-whiteboard-block://${ref.blockId}"`)
+        .join(`src="${url}" class="wb-own-page" style="width:100%"`);
     }
     const html = buildPrintHtml(title, body);
 
-    const { dataUrl, truncated } = await withOffscreen(() =>
-      renderPdfInOffscreen({ html, cssWidth: A4_CONTENT_WIDTH })
-    );
-    await downloadDataUrl(dataUrl, `${safeName(title)}.pdf`);
+    const filename = `${safeName(title)}.pdf`;
+    const bridge = isDownloadBridged();
+    // 下载放进 withOffscreen 回调里：常规模式回传的是 blob URL，随 offscreen 关闭而失效，
+    // 必须在 offscreen 还活着时就落盘。桥接模式回传 dataUrl，交给 sink（downloadDataUrl 内分流）。
+    const { truncated } = await withOffscreen(async () => {
+      const res = await renderPdfInOffscreen({ html, cssWidth: A4_CONTENT_WIDTH, bridge });
+      const url = res.blobUrl ?? res.dataUrl;
+      if (!url) throw new Error(t('progress.pdf.renderFailed'));
+      await downloadDataUrl(url, filename);
+      return res;
+    });
 
     await reportProgress(
       'pdf',

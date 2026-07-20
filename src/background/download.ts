@@ -12,6 +12,14 @@ export function setDownloadSink(sink: DownloadSink | null): void {
   _sink = sink;
 }
 
+/**
+ * 是否处于桥接模式（产物要回传给 CC）。offscreen 侧据此决定：非桥接就地下载
+ * （blob URL，绕过 64MiB），桥接则把 dataUrl 传回 SW 交给 sink。
+ */
+export function isDownloadBridged(): boolean {
+  return _sink != null;
+}
+
 // 控制字符（U+0000–U+001F 与 U+007F）：文件名里出现会被判非法
 const CONTROL_CHARS = new RegExp('[\\u0000-\\u001f\\u007f]', 'g');
 // 格式类隐形字符（Unicode Cf：零宽空格 U+200B、方向控制符、BOM 等）：
