@@ -282,7 +282,8 @@ function renderCellContent(cellId: string, depth: number, ctx: Ctx): string {
   const cell = ctx.tree.map[cellId];
   if (!cell) return '';
   ctx.seen.add(cellId);
-  return renderChildren(cell, depth, ctx).replace(/\n+/g, '<br>').trim();
+  // 先 trim 掉首尾空白（含换行），再把中间的换行转 <br>，避免残留首尾 <br>
+  return renderChildren(cell, depth, ctx).trim().replace(/\n+/g, '<br>');
 }
 
 /** 把整棵子树标记为已渲染，防止后续被当孤儿块重复输出 */
