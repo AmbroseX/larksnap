@@ -4,7 +4,7 @@
     "description": "扩展名称（浏览器管理页与图标悬停标题）"
   },
   "appDesc": {
-    "message": "飞书 / Lark 文档一键导出 Markdown / PDF / HTML 并下载附件，把 Markdown 写回文档；任意网页（含小红书笔记）转 Markdown、整页截图、AI 总结、解除复制、复制链接；下载 B 站 / YouTube / 抖音 / TikTok 视频。",
+    "message": "飞书 / Lark 文档一键导出 Markdown / PDF / HTML 并下载附件，把 Markdown 写回文档；任意网页（含小红书笔记）转 Markdown、整页截图、AI 总结、解除复制、复制链接；下载 B 站 / 抖音 / TikTok 视频。",
     "description": "扩展描述（应用商店与管理页）"
   },
   "cmdOpenPanel": {

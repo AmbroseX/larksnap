@@ -172,12 +172,22 @@ export const FEISHU_TOKEN_RE = /^[A-Za-z0-9]{16,}$/;
 export const FEISHU_HOSTS = ['feishu.cn', 'feishu.net', 'larksuite.com'];
 
 /**
+ * YouTube 观看页 host —— 仅字幕/AI 总结功能识别用（抓取公开 caption 文本，非下载媒体）。
+ * 注意：YouTube 不在下方的 VIDEO_SITES 里 —— 视频下载能力已按 Chrome 应用商店政策
+ * （违规参考 ID: Blue Zinc，禁止协助下载 YouTube 受版权内容）关闭。字幕/总结不受影响，
+ * 仍需这份独立名单（原先是从 VIDEO_SITES 反查 youtube 的 hosts，下架后改用此常量）。
+ */
+export const YOUTUBE_HOSTS = ['youtube.com', 'youtu.be'];
+
+/**
  * 支持视频下载的站点（第一层：整页 URL 交给 daemon 的 yt-dlp 提取）。
  * site 是统计用的枚举名（隐私红线：只上报枚举，不上报真实 URL）。
  */
 export const VIDEO_SITES: ReadonlyArray<{ site: string; hosts: string[] }> = [
   { site: 'bilibili', hosts: ['bilibili.com', 'b23.tv'] },
-  { site: 'youtube', hosts: ['youtube.com', 'youtu.be'] },
+  // YouTube 视频下载已停用以符合 Chrome 应用商店政策（违规参考 ID: Blue Zinc）。
+  // 保留此行注释以便日后如政策允许再恢复；字幕/AI 总结走 YOUTUBE_HOSTS，不受影响。
+  // { site: 'youtube', hosts: ['youtube.com', 'youtu.be'] },
   { site: 'douyin', hosts: ['douyin.com'] },
   { site: 'tiktok', hosts: ['tiktok.com'] },
 ];

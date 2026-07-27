@@ -27,8 +27,12 @@ describe('matchVideoSite', () => {
   it('命中站点表（含子域）', () => {
     expect(matchVideoSite('https://www.bilibili.com/video/BV1xx411c7mD')).toBe('bilibili');
     expect(matchVideoSite('https://b23.tv/abc')).toBe('bilibili');
-    expect(matchVideoSite('https://www.youtube.com/watch?v=abc')).toBe('youtube');
     expect(matchVideoSite('https://www.douyin.com/video/123')).toBe('douyin');
+  });
+
+  it('YouTube 已按 Chrome 政策停用下载，不再命中站点表', () => {
+    expect(matchVideoSite('https://www.youtube.com/watch?v=abc')).toBeNull();
+    expect(matchVideoSite('https://youtu.be/abc')).toBeNull();
   });
 
   it('未命中与坏 URL 返回 null', () => {
@@ -71,8 +75,8 @@ describe('classifyPage 五分类（判定顺序互斥完备）', () => {
     expect(info.videoSite).toBe('youtube');
   });
 
-  it('YouTube 非观看页命中站点表 → video（如首页/频道页）', () => {
-    expect(classifyPage('https://www.youtube.com/').kind).toBe('video');
+  it('YouTube 非观看页 → generic（下载已停用，不再归 video；仅 /watch 走 youtube 字幕上下文）', () => {
+    expect(classifyPage('https://www.youtube.com/').kind).toBe('generic');
   });
 
   it('其余视频站点 → video，并带站点枚举名', () => {

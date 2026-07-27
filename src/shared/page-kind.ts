@@ -1,5 +1,5 @@
 import type { PageKindInfo } from './types';
-import { VIDEO_SITES, CLIP_SITES } from './constants';
+import { VIDEO_SITES, CLIP_SITES, YOUTUBE_HOSTS } from './constants';
 import { detectDocFromUrl } from '../content/feishu-detect';
 
 /**
@@ -47,13 +47,12 @@ export function matchClipSite(url: string): string {
   return 'other';
 }
 
-/** 是否 YouTube 视频观看页：host 复用 VIDEO_SITES 的 youtube 列表，仅 /watch 路径算 */
+/** 是否 YouTube 视频观看页：host 用 YOUTUBE_HOSTS（字幕/总结用，与视频下载无关），仅 /watch 路径算 */
 export function isYoutubeWatchUrl(url: string): boolean {
   if (!url || isRestrictedUrl(url)) return false;
   try {
     const u = new URL(url);
-    const hosts = VIDEO_SITES.find((s) => s.site === 'youtube')?.hosts ?? [];
-    const hit = hosts.some((h) => u.hostname === h || u.hostname.endsWith(`.${h}`));
+    const hit = YOUTUBE_HOSTS.some((h) => u.hostname === h || u.hostname.endsWith(`.${h}`));
     return hit && u.pathname === '/watch' && !!u.searchParams.get('v');
   } catch {
     return false;

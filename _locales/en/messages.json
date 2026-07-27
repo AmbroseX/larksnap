@@ -4,7 +4,7 @@
     "description": "Extension name (management page and icon hover title)"
   },
   "appDesc": {
-    "message": "Export Feishu/Lark docs to Markdown/PDF/HTML with attachments, and write Markdown back; turn any page (incl. Xiaohongshu) into Markdown, full-page screenshot, AI summary, unlock copy, copy links; download videos from Bilibili, YouTube, Douyin & TikTok.",
+    "message": "Export Feishu/Lark docs to Markdown/PDF/HTML with attachments, and write Markdown back; turn any page (incl. Xiaohongshu) into Markdown, full-page screenshot, AI summary, unlock copy, copy links; download videos from Bilibili, Douyin & TikTok.",
     "description": "Extension description (store and management page)"
   },
   "cmdOpenPanel": {
