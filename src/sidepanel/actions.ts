@@ -50,6 +50,13 @@ export const ACTIONS: ActionItem[] = [
     group: 'export',
   },
   {
+    key: 'excel',
+    title: 'actions.excel.title',
+    subtitle: 'actions.excel.subtitle',
+    msg: MSG.EXPORT_EXCEL,
+    group: 'export',
+  },
+  {
     key: 'attachments',
     title: 'actions.attachments.title',
     subtitle: 'actions.attachments.subtitle',

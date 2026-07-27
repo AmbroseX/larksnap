@@ -15,6 +15,7 @@ import { detectDocForTab } from './doc-detect';
 import { getContentTab, setContentTab } from './feishu-proxy';
 import { exportMarkdown } from './exporters/markdown';
 import { exportSheet } from './exporters/sheet';
+import { exportBitable } from './exporters/bitable';
 import { exportPdf } from './exporters/pdf';
 import { exportHtml } from './exporters/html';
 import { exportScreenshot } from './exporters/screenshot';
@@ -141,7 +142,21 @@ const ROUTES: Record<ActionId, ActionRoute> = {
   'feishu-md': { feedback: 'badge', run: (ctx) => runFeishuExport(ctx, 'markdown') },
   'feishu-pdf': { feedback: 'badge', run: (ctx) => runFeishuExport(ctx, 'pdf') },
   'feishu-html': { feedback: 'badge', run: (ctx) => runFeishuExport(ctx, 'html') },
+  'feishu-excel': { feedback: 'badge', run: (ctx) => runExcelExport(ctx) },
 };
+
+/** 多维表格导出 Excel：识别 tab → 就绪校验 → 只放行 base 类型 → 读内存出 xlsx */
+async function runExcelExport(ctx: DispatchContext): Promise<Response> {
+  const doc = await detectDocForTab(ctx.tabId);
+  const err = requireReady(doc);
+  if (err) return err;
+  if (doc!.docType !== 'base') {
+    return { success: false, error: t('bg.excelOnlyBase') };
+  }
+  return withContentTab(ctx.tabId, () =>
+    trackedExport('excel', () => exportBitable(doc!))
+  );
+}
 
 /**
  * 「AI 总结」后台入口：写一次性导航意图（storage.session，读到即删）再开侧边栏，
@@ -192,6 +207,9 @@ async function runFeishuExport(
   const doc = await detectDocForTab(ctx.tabId);
   const err = requireReady(doc);
   if (err) return err;
+  // 多维表格只支持导出 Excel，md/pdf/html 都不适用
+  const baseBlocked = blockBaseOnly(doc!);
+  if (baseBlocked) return baseBlocked;
   return withContentTab(ctx.tabId, () => {
     if (kind === 'markdown') {
       // 电子表格走专门的内存抽取导出（docx 那套 client_vars 对表格是空的）
@@ -220,13 +238,11 @@ export async function withContentTab<T>(tabId: number, run: () => Promise<T>): P
 }
 
 /**
- * 多维表格（base）走的又是另一套接口，现有任何管线都处理不了，全局挡掉。
- * 电子表格（sheets）已由 exportSheet 支持导出 Markdown/CSV，故不在此列——
- * 但 PDF/HTML/附件对表格仍不适用，由 blockSheetOnly 单独挡。
+ * 目前没有任何全局不可导出的飞书文档类型：
+ * 电子表格（sheets）由 exportSheet 出 Markdown/CSV，多维表格（base）由 exportBitable
+ * 出 Excel。各自的"仅支持某种格式"由 blockSheetOnly / blockBaseOnly 单独挡。
  */
-const UNSUPPORTED_EXPORT_TYPES: Partial<Record<DocInfo['docType'], TranslationKey>> = {
-  base: 'bg.docTypeBase',
-};
+const UNSUPPORTED_EXPORT_TYPES: Partial<Record<DocInfo['docType'], TranslationKey>> = {};
 
 /** 校验文档是否就绪（已识别 + 已授权 + 类型可导出），否则返回错误 Response */
 export function requireReady(doc: DocInfo | null): Response | null {
@@ -252,6 +268,17 @@ export function blockSheetOnly(doc: DocInfo): Response | null {
     return {
       success: false,
       error: t('bg.sheetOnlyMarkdown'),
+    };
+  }
+  return null;
+}
+
+/** 多维表格只支持导出 Excel；Markdown/PDF/HTML/附件对它不适用，单独挡 */
+export function blockBaseOnly(doc: DocInfo): Response | null {
+  if (doc.docType === 'base') {
+    return {
+      success: false,
+      error: t('bg.baseOnlyExcel'),
     };
   }
   return null;

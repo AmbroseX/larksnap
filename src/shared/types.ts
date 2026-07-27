@@ -570,7 +570,8 @@ export type ActionId =
   | 'open-panel'
   | 'feishu-md'
   | 'feishu-pdf'
-  | 'feishu-html';
+  | 'feishu-html'
+  | 'feishu-excel';
 
 /**
  * 动作分发上下文：触发瞬间捕获目标标签页，全链路显式传递。

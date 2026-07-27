@@ -40,6 +40,7 @@ import {
   dispatchAction,
   requireReady,
   blockSheetOnly,
+  blockBaseOnly,
   trackedExport,
   withContentTab,
 } from './actions-dispatch';
@@ -209,6 +210,12 @@ async function handleMessage(
       return dispatchAction('feishu-html', ctx);
     }
 
+    case MSG.EXPORT_EXCEL: {
+      const ctx = await capturePanelCtx();
+      if (!ctx) return noActiveTab();
+      return dispatchAction('feishu-excel', ctx);
+    }
+
     case MSG.EXPORT_XHS: {
       const ctx = await capturePanelCtx();
       if (!ctx) return noActiveTab();
@@ -218,6 +225,7 @@ async function handleMessage(
       return (
         err ??
         blockSheetOnly(doc!) ??
+        blockBaseOnly(doc!) ??
         withContentTab(ctx.tabId, () => trackedExport('xhs', () => exportXhs(doc!, themeId)))
       );
     }
@@ -231,6 +239,7 @@ async function handleMessage(
       return (
         err ??
         blockSheetOnly(doc!) ??
+        blockBaseOnly(doc!) ??
         withContentTab(ctx.tabId, () => trackedExport('wechat', () => exportWechat(doc!, themeId)))
       );
     }
@@ -287,6 +296,7 @@ async function handleMessage(
       return (
         err ??
         blockSheetOnly(doc!) ??
+        blockBaseOnly(doc!) ??
         withContentTab(ctx.tabId, () =>
           trackedExport('attachments', () => exportAttachments(doc!))
         )

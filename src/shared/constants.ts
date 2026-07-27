@@ -43,6 +43,8 @@ export const MSG = {
   EXPORT_WORD: 'export_word',
   EXPORT_PDF: 'export_pdf',
   EXPORT_HTML: 'export_html',
+  /** 多维表格导出 Excel（.xlsx，读页面内存拼多 sheet） */
+  EXPORT_EXCEL: 'export_excel',
   EXPORT_ATTACHMENTS: 'export_attachments',
   EXPORT_XHS: 'export_xhs',
   EXPORT_WECHAT: 'export_wechat',

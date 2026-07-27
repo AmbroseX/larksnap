@@ -175,6 +175,7 @@ export const en: Dict = {
     word: { title: 'Export as Word', subtitle: 'Coming soon' },
     pdf: { title: 'Export as PDF', subtitle: 'Auto-rendered high-quality PDF' },
     html: { title: 'Export as HTML', subtitle: 'Download the full web page' },
+    excel: { title: 'Export as Excel', subtitle: 'Export the whole base to .xlsx' },
     xhs: {
       title: 'Export as Xiaohongshu Cards',
       subtitle: 'Vertical image cards as a PNG archive',
@@ -425,6 +426,9 @@ export const en: Dict = {
     docTypeBase: 'Base (bitable)',
     sheetOnlyMarkdown:
       'Spreadsheets only support Markdown (with CSV) export; PDF / HTML / attachments do not apply',
+    baseOnlyExcel:
+      'Base (bitable) only supports Excel export; Markdown / PDF / HTML / attachments do not apply',
+    excelOnlyBase: 'Excel export only applies to a base (bitable)',
     notLoggedIn: 'Log in to Feishu before exporting',
     officialUnavailable: 'Official export unavailable (code {code})',
     exportTimeout: 'Export timed out; please retry',
@@ -543,6 +547,16 @@ export const en: Dict = {
       packing: 'Packing...',
       done: 'Sheet export complete ({n} sheets)',
       emptyTable: '(empty sheet)',
+    },
+    bitable: {
+      reading: 'Reading base data (page memory)...',
+      readFailed: 'Could not read base data (the page may not be fully loaded)',
+      empty: 'The base is empty, or no records were read',
+      building: 'Building Excel...',
+      packing: 'Packing...',
+      done: 'Base export complete ({n} tables)',
+      donePartial:
+        'Base export complete ({n} tables); large tables exported only the loaded {loaded}/{total} rows — scroll to load all, then retry',
     },
     wechat: {
       generating: 'Generating WeChat format...',
