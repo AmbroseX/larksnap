@@ -69,12 +69,13 @@ export const zh = {
       bypass: '不代理的地址列表（每行一个主机，支持 * 通配；命中则强制直连）',
       bypassPlaceholder: '*.bilibili.com\n*.bilivideo.com\n*.douyin.com',
       proxyOnly: '必须走代理的地址列表（同格式；命中则强制走代理，失败不切直连；与上面同时命中时"不代理"优先）',
-      proxyOnlyPlaceholder: '*.youtube.com\n*.tiktok.com',
+      proxyOnlyPlaceholder: '*.bilibili.com\n*.tiktok.com',
     },
     ai: {
       title: 'AI 总结',
       intro:
         '填你自己的 OpenAI 兼容端点。页面正文/字幕只会发送到这个端点，扩展不内置任何第三方 AI 服务；不配置则 AI 总结完全不可用、不发任何请求。API Key 只存在本机浏览器里，不会出现在诊断包或统计中。',
+      recommend: '还没有 API Key？可以到这里注册获取：',
       baseUrl: '接口地址 baseURL（如 https://你的端点，自动拼 /v1/chat/completions）',
       apiKey: 'API Key',
       model: '模型名',

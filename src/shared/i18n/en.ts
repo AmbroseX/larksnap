@@ -73,12 +73,13 @@ export const en: Dict = {
       bypassPlaceholder: '*.bilibili.com\n*.bilivideo.com\n*.douyin.com',
       proxyOnly:
         'Proxy-only list (same format; matches always use the proxy without falling back to direct; bypass wins if both match)',
-      proxyOnlyPlaceholder: '*.youtube.com\n*.tiktok.com',
+      proxyOnlyPlaceholder: '*.bilibili.com\n*.tiktok.com',
     },
     ai: {
       title: 'AI Summary',
       intro:
         'Enter your own OpenAI-compatible endpoint. Page content/subtitles are sent only to this endpoint — the extension bundles no third-party AI service; leave it empty and AI summary stays fully disabled with no requests sent. The API key is stored only in this browser and never appears in diagnostics or statistics.',
+      recommend: "Don't have an API key yet? Register here: ",
       baseUrl: 'Endpoint baseURL (e.g. https://your-endpoint, /v1/chat/completions is appended)',
       apiKey: 'API Key',
       model: 'Model name',

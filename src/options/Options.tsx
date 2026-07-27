@@ -352,6 +352,16 @@ export function Options() {
 
       <h2>{t('options.ai.title')}</h2>
       <p className="trusted-empty">{t('options.ai.intro')}</p>
+      <p className="trusted-empty">
+        {t('options.ai.recommend')}
+        <a
+          href="https://api.wow3.top/register?aff=Q16f"
+          target="_blank"
+          rel="noreferrer"
+        >
+          api.wow3.top
+        </a>
+      </p>
 
       <section className="field">
         <label>{t('options.ai.baseUrl')}</label>
