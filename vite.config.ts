@@ -13,12 +13,31 @@ import {
 import { build as esbuild } from 'esbuild';
 import JavaScriptObfuscator from 'javascript-obfuscator';
 
+// jsPDF 自带的 pdfobjectnewwindow 输出模式会往新窗口注入 cdnjs 上的远程脚本，
+// 本扩展只用 output('datauristring')，这条死代码带着远程 .js 地址被打进产物后，
+// 会触发 Chrome 应用商店"远程托管代码"拒审，打包时把地址替换成空串
+const JSPDF_REMOTE_URLS = [
+  'https://cdnjs.cloudflare.com/ajax/libs/pdfobject/2.1.1/pdfobject.min.js',
+  'http://www.myersdaily.org/joseph/javascript/md5.js',
+];
+
 export default defineConfig(({ mode }) => {
   const isDev = mode === 'development';
 
   return {
     plugins: [
       react(),
+      {
+        name: 'strip-jspdf-remote-urls',
+        transform(code: string, id: string) {
+          if (!id.includes('jspdf')) return null;
+          let out = code;
+          for (const url of JSPDF_REMOTE_URLS) {
+            out = out.split(url).join('');
+          }
+          return out === code ? null : { code: out, map: null };
+        },
+      },
       {
         name: 'extension-post-build',
         async closeBundle() {
@@ -108,6 +127,29 @@ export default defineConfig(({ mode }) => {
           const localesSrc = resolve(__dirname, '_locales');
           if (existsSync(localesSrc)) {
             cpSync(localesSrc, resolve(distDir, '_locales'), { recursive: true });
+          }
+
+          // 上架前守卫：产物里出现远程 .js 地址就直接报错终止构建，
+          // 防止以后新依赖再把远程脚本地址带进包里（github.com 的注释链接不算）
+          if (!isDev) {
+            const jsUrlPattern = /https?:\/\/[^\s"'`()<>]+\.js\b/g;
+            const scanDirs = [distDir, resolve(distDir, 'assets')];
+            for (const dir of scanDirs) {
+              if (!existsSync(dir)) continue;
+              for (const f of readdirSync(dir)) {
+                if (!f.endsWith('.js')) continue;
+                const code = readFileSync(resolve(dir, f), 'utf-8');
+                const hits = (code.match(jsUrlPattern) || []).filter(
+                  (u) => !u.includes('github.com')
+                );
+                if (hits.length > 0) {
+                  throw new Error(
+                    `[remote-js-guard] ${f} 里发现远程 .js 地址，会被应用商店判为远程托管代码：\n  ${hits.join('\n  ')}`
+                  );
+                }
+              }
+            }
+            console.log('[remote-js-guard] 产物检查通过，无远程 .js 地址');
           }
 
           // 代码混淆：默认关闭。Chrome 应用商店禁止上架混淆代码（minify 可以，
