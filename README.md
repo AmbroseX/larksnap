@@ -139,6 +139,14 @@ npm run typecheck  # 仅类型检查
   <img alt="交流群" src="docs/images/交流群.png" width="300">
 </p>
 
+## 赞赏
+
+如果这个工具帮到了你，可以请作者喝杯咖啡 ☕：
+
+<p align="center">
+  <img alt="赞赏码" src="docs/images/赞赏码.png" width="300">
+</p>
+
 ## 致谢
 
 独立实现，设计中参考了这些开源项目的思路：[feishu2md](https://github.com/Wsine/feishu2md)、[xiaoyaosearch-feishu-export-md](https://github.com/dtsola/xiaoyaosearch-feishu-export-md)、[feishu-doc-helper](https://github.com/sancijun/feishu-doc-helper)、[feishu-backup](https://github.com/dicarne/feishu-backup)、[feishu-doc-export](https://github.com/eternalfree/feishu-doc-export)、[OpenCLI](https://github.com/jackwener/OpenCLI)。
