@@ -18,14 +18,62 @@ export async function extractWhiteboards(
   refs: WhiteboardRef[]
 ): Promise<Record<string, string | null>> {
   const tabId = await resolveTargetTabId();
-  const [{ result } = { result: undefined }] =
-    await chrome.scripting.executeScript({
-      target: { tabId },
-      world: 'MAIN',
-      func: extractWhiteboardsInPage,
-      args: [refs.map((r) => r.blockId)],
+  const restore = await bringTabToFront(tabId);
+  try {
+    const [{ result } = { result: undefined }] =
+      await chrome.scripting.executeScript({
+        target: { tabId },
+        world: 'MAIN',
+        func: extractWhiteboardsInPage,
+        args: [refs.map((r) => r.blockId)],
+      });
+    return (result as Record<string, string | null>) ?? {};
+  } finally {
+    await restore();
+  }
+}
+
+/**
+ * 把目标标签页临时切到前台，返回还原函数。
+ *
+ * 画板是 WASM 引擎用 requestAnimationFrame 实时画在 canvas 上的，而 Chrome 会冻结
+ * **不可见**标签页的渲染 —— 后台页里 canvas 压根不会被画，抓到的只有空白。CLI/桥接
+ * 模式的导出正是 `tabs.create({ active: false })` 开的后台页，画板因此一直抓不到
+ * （侧边栏 UI 模式用的是当前页，本来就可见，所以只在 CLI 下复现）。
+ *
+ * 这是唯一可靠的办法：没有接口能让隐藏页恢复渲染。抓完立刻切回原来的标签页和窗口，
+ * 用户只会看到画面闪一下。切换失败一律不影响抓图本身。
+ */
+async function bringTabToFront(tabId: number): Promise<() => Promise<void>> {
+  const noop = async () => {};
+  try {
+    const tab = await chrome.tabs.get(tabId);
+    const win = await chrome.windows.get(tab.windowId);
+    if (tab.active && win.focused) return noop; // 本来就在前台（侧边栏 UI 模式）
+
+    const [prevTab] = await chrome.tabs.query({
+      active: true,
+      windowId: tab.windowId,
     });
-  return (result as Record<string, string | null>) ?? {};
+    const prevWin = await chrome.windows.getLastFocused();
+    if (!tab.active) await chrome.tabs.update(tabId, { active: true });
+    if (!win.focused) await chrome.windows.update(tab.windowId, { focused: true });
+
+    return async () => {
+      try {
+        if (prevTab?.id != null && prevTab.id !== tabId) {
+          await chrome.tabs.update(prevTab.id, { active: true });
+        }
+        if (prevWin?.id != null && prevWin.id !== tab.windowId) {
+          await chrome.windows.update(prevWin.id, { focused: true });
+        }
+      } catch {
+        // 用户中途自己切了标签页/关了窗口，还原不回去也无所谓
+      }
+    };
+  } catch {
+    return noop; // 标签页已关闭等异常：照常尝试抓图
+  }
 }
 
 /**
