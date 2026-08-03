@@ -46,8 +46,18 @@ function makeNode(
     else if (key.includes('inline') && key.includes('code')) node.inlineCode = true;
     else if (key === 'code' || key.includes('codeinline')) node.inlineCode = true;
     else if (key.includes('equation')) node.equation = val;
-    else if (key.includes('link') || key.includes('href') || key.includes('url')) {
-      node.link = decodeLinkValue(val);
+    // 行内组件（提及文档/提及用户等）：正文里只是一个占位空格，标题和链接都在这个 JSON 里
+    else if (key.includes('inline-component') || key.includes('inline_component')) {
+      applyInlineComponent(node, val);
+    }
+    // ⚠️ `link-id` 之类的 id 属性不是 URL（它是行内组件的内部编号），必须排除；
+    // 它在 apool 里常排在 inline-component 之后，认成链接会把正确的 URL 覆盖掉
+    else if (
+      !/(^|[-_])id$/.test(key) &&
+      (key.includes('link') || key.includes('href') || key.includes('url'))
+    ) {
+      const url = decodeLinkValue(val);
+      if (isUsableUrl(url)) node.link = url;
     }
     // 颜色/高亮：只透传 CSS 形态的值（部署间可能是枚举号，认不出就忽略，别渲染错色）
     // ⚠️ background 要先判：key 可能同时含 background 和 color（如 text-background-color）
@@ -63,6 +73,31 @@ function makeNode(
 /** 值是否已是 CSS 色值（#hex / rgb / hsl），枚举号等其他形态不透传 */
 function isCssColor(val: string): boolean {
   return /^(#[0-9a-f]{3,8}|rgba?\(|hsla?\()/i.test((val || '').trim());
+}
+
+/**
+ * 行内组件属性值（JSON 字符串），实测形如：
+ * `{"id":"…","type":"mention_doc","data":{"token":"…","raw_url":"https://…","title":"测试文档"}}`
+ * 把标题写回节点文本（正文里只有占位空格），有链接就一并挂上，
+ * 于是 md/html/公众号 各渲染器都能照常输出成普通链接。
+ */
+function applyInlineComponent(node: InlineNode, raw: string): void {
+  let data: Record<string, unknown>;
+  try {
+    const comp = JSON.parse(raw) as { data?: Record<string, unknown> };
+    data = comp?.data ?? {};
+  } catch {
+    return; // 认不出的形态就保持原样，别把内容弄丢
+  }
+  const title = String(data.title ?? data.name ?? '').trim();
+  const url = decodeLinkValue(String(data.raw_url ?? data.url ?? data.link ?? ''));
+  if (title) node.text = title;
+  if (isUsableUrl(url)) node.link = url;
+}
+
+/** 值是否像个能点的链接（挡掉 uuid、枚举号这类非 URL 值） */
+function isUsableUrl(val: string): boolean {
+  return /^(https?:|mailto:|tel:|\/)/i.test((val || '').trim());
 }
 
 /** 链接值可能是 URL、JSON 或被编码，尽力还原为可用 URL */
