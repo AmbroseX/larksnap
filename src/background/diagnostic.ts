@@ -1,5 +1,4 @@
 import type { DocInfo, Response } from '../shared/types';
-import { EXTENSION_VERSION } from '../shared/constants';
 import { getConfig, getMarkdownCapability } from '../shared/storage';
 import { t } from '../shared/i18n';
 import { reportProgress } from './progress';
@@ -79,7 +78,7 @@ export async function exportDiagnostic(doc: DocInfo | null): Promise<Response> {
   await reportProgress('diagnostic', 'running', t('progress.diagnostic.packing'), 80);
 
   const report = {
-    version: EXTENSION_VERSION,
+    version: chrome.runtime.getManifest().version,
     userAgent: navigator.userAgent,
     generatedAt: new Date().toISOString(),
     doc,

@@ -28,8 +28,8 @@ export function inlineToHtml(nodes: InlineNode[]): string {
       if (n.strike) t = `<s>${t}</s>`;
       if (n.underline) t = `<u>${t}</u>`;
       const styles: string[] = [];
-      if (n.color) styles.push(`color:${n.color}`);
-      if (n.background) styles.push(`background-color:${n.background}`);
+      if (n.color) styles.push(`color:${escapeHtml(n.color)}`);
+      if (n.background) styles.push(`background-color:${escapeHtml(n.background)}`);
       // 卡片是静态图片，链接点不了，保留文字并加下划线示意
       if (n.link) styles.push('text-decoration:underline');
       if (styles.length) t = `<span style="${styles.join(';')}">${t}</span>`;
@@ -57,8 +57,8 @@ export function inlineToWechatHtml(nodes: InlineNode[]): string {
       if (n.strike) deco.push('line-through');
       if (n.underline) deco.push('underline');
       if (deco.length) styles.push(`text-decoration:${deco.join(' ')}`);
-      if (n.color) styles.push(`color:${n.color}`);
-      if (n.background) styles.push(`background-color:${n.background}`);
+      if (n.color) styles.push(`color:${escapeHtml(n.color)}`);
+      if (n.background) styles.push(`background-color:${escapeHtml(n.background)}`);
       if (n.link) {
         // 公众号会剥掉外链 <a> 但保留文字；配色示意这是个链接
         styles.push('color:#576b95');

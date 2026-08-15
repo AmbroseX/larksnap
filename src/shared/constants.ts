@@ -1,8 +1,5 @@
 import type { ExtensionConfig } from './types';
 
-/** 扩展版本（与 manifest 保持同步） */
-export const EXTENSION_VERSION = '0.1.0';
-
 /** chrome.storage.local 的键名 */
 export const STORAGE_KEYS = {
   CONFIG: 'larksnap:config',
