@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { chatCompletionsUrl, extractDelta, parseSse, type SseState } from './llm';
+import { anySignal, chatCompletionsUrl, extractDelta, parseSse, type SseState } from './llm';
 
 const data = (obj: unknown) => `data: ${JSON.stringify(obj)}\n`;
 const delta = (content: string) => ({ choices: [{ delta: { content } }] });
@@ -57,5 +57,66 @@ describe('chatCompletionsUrl', () => {
     expect(chatCompletionsUrl('https://api.x.com')).toBe(
       'https://api.x.com/v1/chat/completions'
     );
+  });
+});
+
+describe('anySignal', () => {
+  /** 抹掉原生 AbortSignal.any，专门测旧版 Chrome 走的兜底分支 */
+  function withoutNative<T>(fn: () => T): T {
+    const native = AbortSignal.any;
+    // @ts-expect-error 测试里临时删掉原生实现
+    delete AbortSignal.any;
+    try {
+      // 确认真删掉了：删不掉的话下面测的还是原生实现，等于白测
+      expect(AbortSignal.any).toBeUndefined();
+      return fn();
+    } finally {
+      AbortSignal.any = native;
+    }
+  }
+
+  it('原生可用时交给原生实现', () => {
+    const a = new AbortController();
+    const merged = anySignal([a.signal, new AbortController().signal]);
+    expect(merged.aborted).toBe(false);
+    a.abort('停止');
+    expect(merged.aborted).toBe(true);
+  });
+
+  it('兜底：任一 signal abort，结果跟着 abort 并沿用 reason', () => {
+    withoutNative(() => {
+      const a = new AbortController();
+      const b = new AbortController();
+      const merged = anySignal([a.signal, b.signal]);
+
+      expect(merged.aborted).toBe(false);
+      b.abort('超时');
+      expect(merged.aborted).toBe(true);
+      expect(merged.reason).toBe('超时');
+    });
+  });
+
+  it('兜底：传入的 signal 已经 abort 时，结果立刻是 aborted', () => {
+    withoutNative(() => {
+      const done = new AbortController();
+      done.abort('早就停了');
+      const merged = anySignal([done.signal, new AbortController().signal]);
+
+      expect(merged.aborted).toBe(true);
+      expect(merged.reason).toBe('早就停了');
+    });
+  });
+
+  it('兜底：谁都没 abort 就保持未 abort，且只认第一个 abort 的 reason', () => {
+    withoutNative(() => {
+      const a = new AbortController();
+      const b = new AbortController();
+      const merged = anySignal([a.signal, b.signal]);
+
+      expect(merged.aborted).toBe(false);
+      a.abort('先来的');
+      b.abort('后到的');
+      expect(merged.reason).toBe('先来的');
+    });
   });
 });

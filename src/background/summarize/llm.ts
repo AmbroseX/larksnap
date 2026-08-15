@@ -146,6 +146,28 @@ function requestInit(ai: AiConfig, stream: boolean, messages: ChatMessage[]): Re
   };
 }
 
+/**
+ * 合并多个 signal：任一 abort，结果就 abort（reason 沿用先 abort 的那个）。
+ *
+ * 原生 AbortSignal.any 要 Chrome 116+，旧版浏览器直接报
+ * "AbortSignal.any is not a function"，会把 AI 总结整条路打死，所以手写兜底。
+ * 监听器挂在结果 signal 上，一旦 abort 由浏览器自动摘掉，不留引用。
+ */
+export function anySignal(signals: AbortSignal[]): AbortSignal {
+  if (typeof AbortSignal.any === 'function') return AbortSignal.any(signals);
+
+  const controller = new AbortController();
+  const opts = { signal: controller.signal, once: true } as const;
+  for (const s of signals) {
+    if (s.aborted) {
+      controller.abort(s.reason);
+      break;
+    }
+    s.addEventListener('abort', () => controller.abort(s.reason), opts);
+  }
+  return controller.signal;
+}
+
 // ==================== 非流式（切块 refine 的中间块用） ====================
 
 /** 调一次 chat/completions，返回首个 choice 的文本 */
@@ -161,7 +183,7 @@ export async function chatComplete(
   try {
     res = await fetch(chatCompletionsUrl(ai.baseUrl), {
       ...requestInit(ai, false, messages),
-      signal: signal ? AbortSignal.any([timeout, signal]) : timeout,
+      signal: signal ? anySignal([timeout, signal]) : timeout,
     });
   } catch (e) {
     throwAsLlmError(e, signal);
