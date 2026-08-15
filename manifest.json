@@ -4,7 +4,6 @@
   "version": "0.5.4",
   "description": "__MSG_appDesc__",
   "default_locale": "zh_CN",
-  "minimum_chrome_version": "116",
   "permissions": [
     "cookies",
     "tabs",
