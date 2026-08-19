@@ -217,7 +217,8 @@ const httpServer = createServer(async (req, res) => {
       res.writeHead(400).end('bad json');
       return;
     }
-    if (!job.url) {
+    // 搜索任务不带 url（结果页 URL 由扩展的引擎表统一拼，避免两边各存一份模板）
+    if (!job.url && job.kind !== 'search') {
       res.writeHead(400).end('missing url');
       return;
     }
@@ -227,14 +228,19 @@ const httpServer = createServer(async (req, res) => {
       res.end(JSON.stringify({ type: 'error', subtype: routed.subtype, message: routed.error }) + '\n');
       return;
     }
-    // 旧扩展不认识 kind='edit'，会把它当普通抓取任务执行 → 必须挡在派发之前
-    if (job.kind === 'edit' && (routed.conn._proto ?? 0) < 2) {
+    // 旧扩展不认识新 kind，会把它当普通抓取任务执行（编辑任务变抓取、搜索任务返回一坨
+    // 搜索页 Markdown），比报错更难排查 → 必须挡在派发之前
+    const KIND_MIN_PROTO = { edit: 2, search: 5 };
+    const needProto = KIND_MIN_PROTO[job.kind];
+    if (needProto && (routed.conn._proto ?? 0) < needProto) {
       res.writeHead(200, { 'content-type': 'application/x-ndjson' });
       res.end(
         JSON.stringify({
           type: 'error',
           subtype: 'extension_outdated',
-          message: `扩展协议版本过旧（v${routed.conn._proto ?? '?'}），不支持编辑任务。`,
+          message: `扩展协议版本过旧（v${routed.conn._proto ?? '?'}，需要 v${needProto}），不支持${
+            job.kind === 'search' ? '搜索' : '编辑'
+          }任务。`,
         }) + '\n'
       );
       return;
@@ -248,18 +254,33 @@ const httpServer = createServer(async (req, res) => {
       pending.delete(id); // CLI 提前断开
       armIdle();
     });
-    // 编辑任务字段（kind/op/contentMd/anchor）原样透传，daemon 不理解语义
+    // 编辑/搜索任务字段（kind/op/contentMd/anchor/search）原样透传，daemon 不理解语义
     routed.conn.send(
       JSON.stringify({
         type: 'job',
         id,
-        url: job.url,
+        url: job.url || '',
         format: job.format || 'md',
         opts: job.opts || {},
-        ...(job.kind ? { kind: job.kind, op: job.op, contentMd: job.contentMd, anchor: job.anchor } : {}),
+        ...(job.kind
+          ? {
+              kind: job.kind,
+              op: job.op,
+              contentMd: job.contentMd,
+              anchor: job.anchor,
+              search: job.search,
+            }
+          : {}),
       })
     );
-    log('dispatch', id, routed.conn._contextId, job.kind ? `${job.kind}:${job.op}` : '', job.url);
+    log(
+      'dispatch',
+      id,
+      routed.conn._contextId,
+      job.kind ? `${job.kind}:${job.op || job.search?.engine || ''}` : '',
+      // 搜索任务只记引擎不记关键词：用户搜什么是隐私，不进日志
+      job.kind === 'search' ? '(search)' : job.url
+    );
     return;
   }
 

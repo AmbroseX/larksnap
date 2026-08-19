@@ -33,6 +33,12 @@ import { exportHtml } from './exporters/html';
 import { track } from './analytics';
 import { runEditJob } from './editor';
 import { waitForTabComplete } from './tab-util';
+import {
+  buildSearchUrl,
+  extractSearchResults,
+  searchEngineHost,
+  type SearchExtraction,
+} from './search';
 
 const PORT = 19925;
 const PING_URL = `http://127.0.0.1:${PORT}/ping`;
@@ -42,7 +48,8 @@ const WS_URL = `ws://127.0.0.1:${PORT}/ext`;
 // v2: 支持编辑任务（kind='edit'，daemon 只对 proto>=2 的扩展派发编辑任务）
 // v3: 扩展可主动发起视频下载（video-job），daemon 本机跑 yt-dlp 并主动推进度回来
 // v4: daemon 可发 list-domains（已授权域名清单），扩展回 domains-result
-const PROTOCOL_VERSION = 4;
+// v5: 支持搜索任务（kind='search'，daemon 只对 proto>=5 的扩展派发）
+const PROTOCOL_VERSION = 5;
 const KEEPALIVE_ALARM = 'larksnap-bridge-keepalive';
 const RECONNECT_BASE = 2000;
 const RECONNECT_MAX = 5000;
@@ -363,6 +370,8 @@ interface HostMessage {
     // new-doc 的新建标题搭 anchor 便车
     name?: string;
   };
+  // 搜索任务字段（kind='search' 时有效）
+  search?: { engine?: string; query?: string; limit?: number };
 }
 
 async function onMessage(raw: string): Promise<void> {
@@ -411,6 +420,18 @@ async function onMessage(raw: string): Promise<void> {
         error: err instanceof Error ? err.message : String(err),
       });
     }
+    return;
+  }
+  // 搜索任务不带 url（结果页 URL 由本扩展的引擎表拼），要先于下面「必须有 url」的分支
+  if (msg.type === 'job' && msg.id && msg.kind === 'search') {
+    const id = msg.id;
+    await runSearchJob({
+      id,
+      engine: msg.search?.engine || '',
+      query: msg.search?.query || '',
+      limit: msg.search?.limit ?? 10,
+      opts: msg.opts || {},
+    });
     return;
   }
   if (msg.type === 'job' && msg.id && msg.url) {
@@ -651,3 +672,77 @@ async function runWebpageJob(job: Job, host: string): Promise<void> {
   }
 }
 
+
+/**
+ * 搜索任务：后台打开搜索引擎结果页 → 注入解析器 → 回传结构化结果。
+ *
+ * 只跑一个引擎、只取第一页。换引擎降级由 CLI 侧连发多次任务完成，这里不做重试策略。
+ */
+async function runSearchJob(job: {
+  id: string;
+  engine: string;
+  query: string;
+  limit: number;
+  opts: { keepTab?: boolean };
+}): Promise<void> {
+  const url = buildSearchUrl(job.engine, job.query);
+  if (!url) {
+    reply(job.id, {
+      type: 'error',
+      subtype: 'engine_unsupported',
+      message: `不支持的搜索引擎或空关键词（engine=${job.engine}）`,
+    });
+    return;
+  }
+  const host = searchEngineHost(job.engine);
+  if (!(await hasPermissionForHost(host))) {
+    reply(job.id, { type: 'need-auth', host, kind: 'search' });
+    return;
+  }
+
+  let tabId: number | undefined;
+  try {
+    reply(job.id, { type: 'progress', message: `正在后台打开 ${host} 搜索…`, percent: 10 });
+    const tab = await chrome.tabs.create({ url, active: false });
+    tabId = tab.id;
+    if (tabId == null) throw new Error('无法打开标签页');
+    await waitForTabComplete(tabId);
+
+    reply(job.id, { type: 'progress', message: '正在解析搜索结果…', percent: 60 });
+    // 轮询重试：tab 状态 complete 不代表条目已渲染（DDG 主站是 JS 渲染的），
+    // 拿到 0 条就等 500ms 再试，最多 4 次，避免假性零结果。
+    let data: SearchExtraction = { status: 'empty', results: [] };
+    for (let i = 0; i < 4; i++) {
+      const [res] = await chrome.scripting.executeScript({
+        target: { tabId },
+        func: extractSearchResults,
+        args: [job.engine, job.limit],
+      });
+      data = (res?.result as SearchExtraction) || data;
+      if (data.status !== 'empty') break;
+      await new Promise((r) => setTimeout(r, 500));
+    }
+
+    // 埋点只报成败与引擎，**不报关键词也不报结果链接**（用户搜什么是隐私）
+    void track({
+      name: 'bridge',
+      url: '/bridge/task',
+      data: { ok: data.status === 'ok', kind: 'search', engine: job.engine },
+    });
+    reply(job.id, {
+      type: 'result',
+      search: { engine: job.engine, status: data.status, results: data.results, note: data.note },
+    });
+  } catch (err) {
+    void track({ name: 'bridge', url: '/bridge/task', data: { ok: false, kind: 'search' } });
+    reply(job.id, { type: 'error', message: err instanceof Error ? err.message : String(err) });
+  } finally {
+    if (tabId != null && job.opts.keepTab !== true) {
+      try {
+        await chrome.tabs.remove(tabId);
+      } catch {
+        /* 标签页可能已被关闭 */
+      }
+    }
+  }
+}

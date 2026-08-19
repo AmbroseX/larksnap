@@ -17,8 +17,8 @@ import fs from 'node:fs';
 import crypto from 'node:crypto';
 import { EventEmitter } from 'node:events';
 
-export const DAEMON_VERSION = '1.6.0'; // 1.6.0: GET /hosts 已授权域名清单（new-doc 免链接）
-export const PROTOCOL_VERSION = 4; // WS 握手用：hello/welcome 双向携带，不匹配时提示更新。v2: kind='edit'；v3: 扩展可主动发 video-job，daemon 主动推进度；v4: daemon 可发 list-domains，扩展回 domains-result
+export const DAEMON_VERSION = '1.7.0'; // 1.7.0: kind='search' 浏览器搜索任务
+export const PROTOCOL_VERSION = 5; // WS 握手用：hello/welcome 双向携带，不匹配时提示更新。v2: kind='edit'；v3: 扩展可主动发 video-job，daemon 主动推进度；v4: daemon 可发 list-domains，扩展回 domains-result；v5: kind='search' 搜索任务（旧扩展会把它当普通网页抓，必须挡住）
 export const HOST = '127.0.0.1';
 export const PORT = Number(process.env.LARKSNAP_PORT || 19925);
 export const PING_URL = `http://${HOST}:${PORT}/ping`;

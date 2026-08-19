@@ -310,68 +310,80 @@ export function getHosts(profile, failFn) {
  * 流结束仍无终结 → no_result 报错。失败均走 failFn 直接退出，本函数不返回。
  */
 export function postCommand(job, onLine, failFn) {
+  return new Promise(() => {
+    streamCommand(job, onLine, failFn, (code) => process.exit(code));
+  });
+}
+
+/**
+ * 与 postCommand 同一条链路，但**不退出进程**：onLine 终结时把它的返回值 resolve 出来，
+ * 交给调用方决定下一步。多引擎降级要用（这一家没搜到就换下一家，不能一失败整个进程就死）。
+ * 传输层错误（daemon 挂了 / 签名不对）仍然直接 failFn 退出——那种情况换引擎也没用。
+ */
+export function tryCommand(job, onLine, failFn) {
   return new Promise((resolve) => {
-    const body = JSON.stringify(job);
-    const req = http.request(
-      {
-        host: HOST,
-        port: PORT,
-        path: '/command',
-        method: 'POST',
-        headers: {
-          'content-type': 'application/json',
-          'content-length': Buffer.byteLength(body),
-          [AUTH_HEADER]: '1',
-          [SIG_HEADER]: makeSigHeader(getSecret(), 'POST', '/command', body),
-        },
+    streamCommand(job, onLine, failFn, resolve);
+  });
+}
+
+/** 发请求 + 切行 + 派发；终结时调 finish(onLine 的返回值)。上面两个导出的共同内核。 */
+function streamCommand(job, onLine, failFn, finish) {
+  const body = JSON.stringify(job);
+  const req = http.request(
+    {
+      host: HOST,
+      port: PORT,
+      path: '/command',
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        'content-length': Buffer.byteLength(body),
+        [AUTH_HEADER]: '1',
+        [SIG_HEADER]: makeSigHeader(getSecret(), 'POST', '/command', body),
       },
-      (res) => {
-        let acc = '';
-        let resolved = false;
-        res.setEncoding('utf8');
-        res.on('data', (chunk) => {
-          acc += chunk;
-          let idx;
-          while ((idx = acc.indexOf('\n')) >= 0) {
-            const line = acc.slice(0, idx);
-            acc = acc.slice(idx + 1);
-            if (line.trim()) {
-              // 终结分支可返回 Promise（如 fetch 要先下载图片），其余返回数字或 null
-              const code = onLine(JSON.parse(line));
-              if (code != null && !resolved) {
-                resolved = true;
-                Promise.resolve(code).then(exit);
-              }
+    },
+    (res) => {
+      let acc = '';
+      let resolved = false;
+      res.setEncoding('utf8');
+      res.on('data', (chunk) => {
+        acc += chunk;
+        let idx;
+        while ((idx = acc.indexOf('\n')) >= 0) {
+          const line = acc.slice(0, idx);
+          acc = acc.slice(idx + 1);
+          if (line.trim()) {
+            // 终结分支可返回 Promise（如 fetch 要先下载图片），其余返回数字/对象或 null
+            const value = onLine(JSON.parse(line));
+            if (value != null && !resolved) {
+              resolved = true;
+              Promise.resolve(value).then(finish);
             }
           }
-        });
-        res.on('end', () => {
-          if (!resolved) {
-            failFn({
-              type: 'export',
-              subtype: 'no_result',
-              message: '连接结束但未收到结果',
-              hint: '点一下扩展图标唤醒后台 Service Worker，然后重跑本命令。',
-              retryable: true,
-            });
-          }
-        });
-      }
-    );
-    req.on('error', (e) => {
-      failFn({
-        type: 'bridge',
-        subtype: 'bridge_request_failed',
-        message: `请求 daemon 失败: ${e.message}`,
-        hint: '直接重跑本命令；仍失败则查看 ~/.larksnap/daemon.log。',
-        retryable: true,
+        }
       });
-    });
-    req.write(body);
-    req.end();
-    function exit(code) {
-      resolve();
-      process.exit(code);
+      res.on('end', () => {
+        if (!resolved) {
+          failFn({
+            type: 'export',
+            subtype: 'no_result',
+            message: '连接结束但未收到结果',
+            hint: '点一下扩展图标唤醒后台 Service Worker，然后重跑本命令。',
+            retryable: true,
+          });
+        }
+      });
     }
+  );
+  req.on('error', (e) => {
+    failFn({
+      type: 'bridge',
+      subtype: 'bridge_request_failed',
+      message: `请求 daemon 失败: ${e.message}`,
+      hint: '直接重跑本命令；仍失败则查看 ~/.larksnap/daemon.log。',
+      retryable: true,
+    });
   });
+  req.write(body);
+  req.end();
 }
