@@ -9,6 +9,7 @@
 # 已经 clone 了仓库：
 #   ./install.sh                # 装技能 + 检查依赖 + 把 daemon 装成开机自启的常驻服务
 #   ./install.sh --link         # 技能用软链指向仓库（改代码即时生效，适合开发）
+#   ./install.sh --update       # 只更新技能到最新版并重启 daemon（已经装过的用这个）
 #   ./install.sh --no-service   # 只装技能和依赖，不注册常驻服务
 #   ./install.sh --yes          # 一路默认同意（管道执行时本来就不会问）
 #   ./install.sh --uninstall    # 停服务、删服务文件、删已安装的技能目录
@@ -18,6 +19,8 @@ set -euo pipefail
 
 REPO_SLUG="${LARKSNAP_REPO:-AmbroseX/larksnap}"
 REPO_BRANCH="${LARKSNAP_BRANCH:-main}"
+# Chrome 应用商店页：装完直接把这一页打开，省得用户自己去搜
+STORE_URL="${LARKSNAP_STORE_URL:-https://chromewebstore.google.com/detail/gepndmikbdjpdedkfiejchmhmhegjeal}"
 SKILL_NAME="larksnap-fetch"
 SKILLS_DIR="${LARKSNAP_SKILLS_DIR:-$HOME/.claude/skills}"
 SKILL_DST="$SKILLS_DIR/$SKILL_NAME"
@@ -35,13 +38,15 @@ MODE_LINK=0
 WITH_SERVICE=1
 ASSUME_YES=0
 DO_UNINSTALL=0
+DO_UPDATE=0
 
 usage() {
   cat <<'USAGE'
 用法：
   curl -fsSL https://raw.githubusercontent.com/AmbroseX/larksnap/main/install.sh | bash
-  ./install.sh [--link] [--no-service] [--yes] [--uninstall]
+  ./install.sh [--update] [--link] [--no-service] [--yes] [--uninstall]
 
+  --update      只更新技能到最新版并重启 daemon（不查依赖、不重装服务、不跳商店）
   --link        技能用软链指向仓库（开发用，仅本地仓库模式有效）
   --no-service  不注册 daemon 常驻服务
   --yes, -y     不询问，一路同意
@@ -51,6 +56,7 @@ USAGE
 
 for arg in "$@"; do
   case "$arg" in
+    --update|--upgrade) DO_UPDATE=1 ;;
     --link) MODE_LINK=1 ;;
     --no-service) WITH_SERVICE=0 ;;
     --yes|-y) ASSUME_YES=1 ;;
@@ -72,6 +78,18 @@ ask() {
   local reply=''
   read -r -p "$1 [y/N] " reply || true
   [[ "$reply" =~ ^[Yy]$ ]]
+}
+
+# 用默认浏览器打开一个地址。没有图形环境（服务器、容器）或没装 opener 就放弃，
+# 地址本来就已经打印在屏幕上了。设 LARKSNAP_NO_OPEN=1 可以彻底关掉。
+open_url() {
+  [ -n "${LARKSNAP_NO_OPEN:-}" ] && return 1
+  if [ "$OS" = "Darwin" ]; then
+    command -v open >/dev/null 2>&1 && open "$1" >/dev/null 2>&1 && return 0
+  elif [ -n "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ]; then
+    command -v xdg-open >/dev/null 2>&1 && xdg-open "$1" >/dev/null 2>&1 && return 0
+  fi
+  return 1
 }
 
 # ---------- 源码位置：本地仓库直接用，管道执行就去 GitHub 拉一份 ----------
@@ -203,12 +221,24 @@ stop_service() {
 
 start_service() {
   if [ "$OS" = "Darwin" ]; then
+    # 已经加载过的话 bootstrap 会直接失败，所以先卸再装：重跑脚本才是幂等的，
+    # 顺带让服务重启一次，跑上刚更新的技能代码
+    launchctl bootout "gui/$(id -u)/$SERVICE_LABEL" 2>/dev/null || true
     launchctl bootstrap "gui/$(id -u)" "$PLIST_PATH" 2>/dev/null ||
       launchctl load -w "$PLIST_PATH"
   else
     systemctl --user daemon-reload
-    systemctl --user enable --now larksnap-daemon.service
+    systemctl --user enable larksnap-daemon.service
+    # 用 restart 不用 start：服务本来就在跑的话，只有重启才会加载新代码
+    systemctl --user restart larksnap-daemon.service
   fi
+}
+
+# 技能版本号就看 protocol.mjs 里的 DAEMON_VERSION，没有额外的版本文件
+skill_version() {
+  local f="$1/scripts/bridge/protocol.mjs"
+  [ -f "$f" ] || return 1
+  sed -n "s/.*DAEMON_VERSION *= *'\([^']*\)'.*/\1/p" "$f" | head -1
 }
 
 # ---------- 卸载 ----------
@@ -223,6 +253,11 @@ if [ "$DO_UNINSTALL" = 1 ]; then
   fi
   info "卸载完成（$HOME_DIR 下的日志和密钥保留，不需要就自己删）"
   exit 0
+fi
+
+# ---------- 0. --update 只对装过的机器有意义 ----------
+if [ "$DO_UPDATE" = 1 ] && [ ! -e "$SKILL_DST" ] && [ ! -L "$SKILL_DST" ]; then
+  err "还没装过技能（$SKILL_DST 不存在），去掉 --update 跑一次完整安装"
 fi
 
 # ---------- 1. 检查 Node ----------
@@ -246,6 +281,10 @@ fi
 [ -d "$SKILL_SRC" ] || err "找不到技能目录：$SKILL_SRC"
 
 # ---------- 3. 装技能 ----------
+OLD_VER="$(skill_version "$SKILL_DST" 2>/dev/null || true)"
+# 旧 daemon 还占着旧代码，先让它退出；服务模式下后面 start_service 会再拉起来
+[ -n "$OLD_VER" ] && stop_daemon
+
 mkdir -p "$SKILLS_DIR" "$HOME_DIR"
 rm -rf "$SKILL_DST"   # 软链和目录都清掉，避免复制进了旧目录里面
 if [ "$MODE_LINK" = 1 ]; then
@@ -253,7 +292,25 @@ if [ "$MODE_LINK" = 1 ]; then
   info "技能已软链：$SKILL_DST -> ${SKILL_SRC}（改仓库代码即时生效）"
 else
   cp -R "$SKILL_SRC" "$SKILL_DST"
-  info "技能已安装：$SKILL_DST"
+  NEW_VER="$(skill_version "$SKILL_DST" 2>/dev/null || true)"
+  if [ -z "$OLD_VER" ]; then
+    info "技能已安装：${SKILL_DST}（v${NEW_VER:-?}）"
+  elif [ "$OLD_VER" = "$NEW_VER" ]; then
+    info "技能已是最新：${SKILL_DST}（v${NEW_VER:-?}，没有变化）"
+  else
+    info "技能已更新：v$OLD_VER → v${NEW_VER:-?}（${SKILL_DST}）"
+  fi
+fi
+
+# --update 到此为止：不查依赖、不重装服务、不跳商店，只把 daemon 换成新代码
+if [ "$DO_UPDATE" = 1 ]; then
+  if [ -f "$PLIST_PATH" ] || [ -f "$UNIT_PATH" ]; then
+    start_service
+    info "常驻服务已重启，跑的是新技能代码"
+  else
+    info "没装常驻服务，daemon 下次用到时会自动拉起新版本"
+  fi
+  exit 0
 fi
 
 # ---------- 4. 可选依赖：yt-dlp / ffmpeg（只有「下载视频」用得到） ----------
@@ -331,7 +388,9 @@ fi
 echo
 info "装好了。还差最后一步——装浏览器扩展（登录态和导出引擎都在扩展里）："
 if [ "$REMOTE" = 1 ]; then
-  echo "  1) Chrome 应用商店搜 LarkSnap 安装，或到 https://github.com/$REPO_SLUG/releases 下 zip 解压"
+  echo "  1) 到 Chrome 应用商店装扩展（这一页等下会自动打开）："
+  echo "     $STORE_URL"
+  echo "     打不开就到 https://github.com/$REPO_SLUG/releases 下 zip 解压"
   echo "     （下 zip 的话：chrome://extensions → 开「开发者模式」→「加载已解压的扩展程序」选解压出的目录）"
 elif [ -d "$REPO_DIR/dist" ]; then
   echo "  1) chrome://extensions → 开「开发者模式」→「加载已解压的扩展程序」，选：$REPO_DIR/dist"
@@ -342,7 +401,18 @@ echo "  2) 点一下扩展图标唤醒后台，它会自动连上本地 daemon"
 echo
 if [ "$REMOTE" = 1 ]; then
   echo "  日志：$LOG_PATH"
+  echo "  更新技能：curl -fsSL https://raw.githubusercontent.com/$REPO_SLUG/$REPO_BRANCH/install.sh | bash -s -- --update"
   echo "  卸载：curl -fsSL https://raw.githubusercontent.com/$REPO_SLUG/$REPO_BRANCH/install.sh | bash -s -- --uninstall"
 else
-  echo "  日志：$LOG_PATH ｜ 卸载：$0 --uninstall"
+  echo "  日志：$LOG_PATH ｜ 更新技能：$0 --update ｜ 卸载：$0 --uninstall"
+fi
+
+# 远程装的人多半是直接照着提示走的，帮他把商店页点开
+if [ "$REMOTE" = 1 ]; then
+  echo
+  if open_url "$STORE_URL"; then
+    info "已经帮你打开商店页面了；没弹出来就手动开上面那个地址"
+  else
+    info "去这个地址装扩展：$STORE_URL"
+  fi
 fi

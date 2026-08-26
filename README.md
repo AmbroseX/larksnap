@@ -120,6 +120,7 @@ irm https://raw.githubusercontent.com/AmbroseX/larksnap/main/install.ps1 | iex
 
 | macOS / Linux | Windows | 作用 |
 |---|---|---|
+| `--update` | `-Update` | 只把技能更新到最新版并重启 daemon，不查依赖、不重装服务 |
 | `--link` | `-Link` | 技能改成软链指向仓库，改代码即时生效（开发用） |
 | `--no-service` | `-NoService` | 不注册常驻服务，daemon 仍会在首次用到时自动拉起 |
 | `--yes` | `-Yes` | 不询问，缺依赖直接装 |
@@ -133,6 +134,13 @@ curl -fsSL https://raw.githubusercontent.com/AmbroseX/larksnap/main/install.sh |
 
 ```powershell
 & ([scriptblock]::Create((irm https://raw.githubusercontent.com/AmbroseX/larksnap/main/install.ps1))) -Yes
+```
+
+装过之后想升级技能（扩展本体由浏览器自己更新），重跑一次带 `--update` 就行，
+它会把技能换成最新版并重启 daemon：
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/AmbroseX/larksnap/main/install.sh | bash -s -- --update
 ```
 
 然后在 Claude Code 里说：

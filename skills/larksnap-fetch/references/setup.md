@@ -17,6 +17,7 @@ irm https://raw.githubusercontent.com/AmbroseX/larksnap/main/install.ps1 | iex
 装技能 + 查依赖(yt-dlp / ffmpeg) + 把 daemon 注册成登录自启的常驻服务(macOS launchd /
 Linux systemd --user / Windows 计划任务 `LarkSnapDaemon`),最后打印加载扩展的步骤。
 
+- 更新技能:加 `--update`(Windows `-Update`),把技能换成最新版并重启 daemon,不重复查依赖、不重装服务。
 - 不想要常驻服务:加 `--no-service`(Windows `-NoService`),daemon 仍会在首次跑 fetch.mjs 时自动拉起。
 - 卸载:加 `--uninstall`(Windows `-Uninstall`)。
 - 远程一键命令带参数的写法:
