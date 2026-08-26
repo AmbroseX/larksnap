@@ -89,6 +89,52 @@
 npx skills add AmbroseX/larksnap --skill larksnap-fetch -g -a claude-code
 ```
 
+#### 一键安装（推荐）
+
+一条命令搞定技能安装、依赖检查、daemon 常驻，不用先 clone 仓库——脚本只把技能取下来装好，
+临时文件用完就删，本机不留源码副本（扩展本体照旧从商店或 Releases 装）。
+
+macOS / Linux：
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/AmbroseX/larksnap/main/install.sh | bash
+```
+
+Windows（PowerShell）：
+
+```powershell
+irm https://raw.githubusercontent.com/AmbroseX/larksnap/main/install.ps1 | iex
+```
+
+它会做四件事：检查 Node 18+ → 把技能装到 `~/.claude/skills/larksnap-fetch` → 检查
+`yt-dlp` / `ffmpeg`（只有下载视频要用，缺了会问你装不装）→ 把 daemon 注册成登录自启的常驻服务，
+最后打印装扩展的步骤。daemon 空闲 30 分钟会自退，常驻机制负责再拉起来：
+
+| 系统 | 常驻方式 |
+|---|---|
+| macOS | LaunchAgent（`KeepAlive`，进程被杀立刻重启） |
+| Linux | systemd --user（`Restart=always`；想在没登录时也常驻，跑 `sudo loginctl enable-linger $USER`） |
+| Windows | 计划任务 `LarkSnapDaemon`（登录时启动 + 每 5 分钟兜底拉起，窗口静默） |
+
+已经 clone 过仓库就直接跑 `./install.sh`（Windows 是 `.\install.ps1`），常用参数：
+
+| macOS / Linux | Windows | 作用 |
+|---|---|---|
+| `--link` | `-Link` | 技能改成软链指向仓库，改代码即时生效（开发用） |
+| `--no-service` | `-NoService` | 不注册常驻服务，daemon 仍会在首次用到时自动拉起 |
+| `--yes` | `-Yes` | 不询问，缺依赖直接装 |
+| `--uninstall` | `-Uninstall` | 停服务、删服务文件和已安装的技能目录 |
+
+远程一键命令要带参数时这么写：
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/AmbroseX/larksnap/main/install.sh | bash -s -- --yes
+```
+
+```powershell
+& ([scriptblock]::Create((irm https://raw.githubusercontent.com/AmbroseX/larksnap/main/install.ps1))) -Yes
+```
+
 然后在 Claude Code 里说：
 
 > 把 `https://your-company.feishu.cn/docx/xxxxxxxx` 下载到 `./docs`

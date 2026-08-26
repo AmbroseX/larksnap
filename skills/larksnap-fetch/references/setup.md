@@ -1,5 +1,28 @@
 # 安装、排查与视频下载
 
+# 一键安装
+
+macOS / Linux:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/AmbroseX/larksnap/main/install.sh | bash
+```
+
+Windows(PowerShell):
+
+```powershell
+irm https://raw.githubusercontent.com/AmbroseX/larksnap/main/install.ps1 | iex
+```
+
+装技能 + 查依赖(yt-dlp / ffmpeg) + 把 daemon 注册成登录自启的常驻服务(macOS launchd /
+Linux systemd --user / Windows 计划任务 `LarkSnapDaemon`),最后打印加载扩展的步骤。
+
+- 不想要常驻服务:加 `--no-service`(Windows `-NoService`),daemon 仍会在首次跑 fetch.mjs 时自动拉起。
+- 卸载:加 `--uninstall`(Windows `-Uninstall`)。
+- 远程一键命令带参数的写法:
+  `curl -fsSL <url>/install.sh | bash -s -- --yes` /
+  `& ([scriptblock]::Create((irm <url>/install.ps1))) -Yes`
+
 # 首次安装(仅一次,只需加载扩展,无系统级安装)
 
 扩展来自 larksnap 仓库(本技能不含扩展本体,只含桥接 daemon):
