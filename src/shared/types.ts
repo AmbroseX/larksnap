@@ -127,8 +127,6 @@ export interface ExtensionConfig {
   language: LanguageSetting;
   /** 导出 Markdown 时图片处理方式 */
   imageMode: 'download' | 'link';
-  /** 反馈页面 URL */
-  feedbackUrl: string;
   /** 是否在导出诊断信息中包含页面快照 */
   diagnosticIncludeSnapshot: boolean;
   /** 已运行时授权的私有化域名 origin 列表（如 https://x.私有化租户.com） */

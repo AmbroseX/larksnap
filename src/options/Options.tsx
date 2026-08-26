@@ -1,6 +1,12 @@
 import { useEffect, useState } from 'react';
 import type { AiConfig, ExtensionConfig, VideoProxyConfig, WebCopyConfig } from '../shared/types';
-import { DEFAULT_CONFIG, MSG } from '../shared/constants';
+import {
+  DEFAULT_CONFIG,
+  FEEDBACK_URL,
+  MSG,
+  REPO_URL,
+  STORE_REVIEWS_URL,
+} from '../shared/constants';
 import { getConfig, saveConfig } from '../shared/storage';
 import { sendToBackground } from '../shared/messaging';
 import { useI18n } from '../shared/i18n/useI18n';
@@ -178,13 +184,13 @@ export function Options() {
         </button>
       </section>
 
+      {/* 反馈地址写死在代码里：只展示不给改，免得填错后反馈发不出来 */}
       <section className="field">
         <label>{t('options.feedbackUrl')}</label>
-        <input
-          type="text"
-          value={config.feedbackUrl}
-          onChange={(e) => update('feedbackUrl', e.target.value)}
-        />
+        <p className="shortcuts-desc">{t('options.feedbackFixed')}</p>
+        <a className="link-btn" href={FEEDBACK_URL} target="_blank" rel="noreferrer">
+          {FEEDBACK_URL}
+        </a>
       </section>
 
       <section className="field checkbox">
@@ -430,6 +436,20 @@ export function Options() {
             ))}
           </ul>
         )}
+      </section>
+
+      {/* 支持项目：给 GitHub 点 Star、去商店写评价，都是外链新标签打开 */}
+      <h2>{t('options.support.title')}</h2>
+      <section className="field">
+        <p className="shortcuts-desc">{t('options.support.desc')}</p>
+        <div className="link-row">
+          <a className="link-btn" href={REPO_URL} target="_blank" rel="noreferrer">
+            {t('options.support.star')}
+          </a>
+          <a className="link-btn" href={STORE_REVIEWS_URL} target="_blank" rel="noreferrer">
+            {t('options.support.review')}
+          </a>
+        </div>
       </section>
 
       {/* 隐私与统计：设置页最底部的折叠区，默认收起。一次点击即可展开、真实可关，

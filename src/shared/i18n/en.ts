@@ -22,6 +22,14 @@ export const en: Dict = {
       link: 'Keep online links',
     },
     feedbackUrl: 'Feedback page URL',
+    feedbackFixed:
+      'Fixed to the project GitHub Issues page and cannot be changed; click the link below to report a problem.',
+    support: {
+      title: 'Support the project',
+      desc: 'If it helps you, star it on GitHub or leave a review on the store.',
+      star: '⭐ Star on GitHub',
+      review: '📝 Review on Chrome Web Store',
+    },
     shortcuts: {
       label: 'Keyboard shortcuts',
       desc: 'Open panel Ctrl/Cmd+Shift+L · Page to Markdown Ctrl/Cmd+Shift+M · Full-page screenshot Ctrl/Cmd+Shift+S; "AI summary" has no default key and can be configured.',
@@ -162,6 +170,8 @@ export const en: Dict = {
       generic: 'Web page',
       restricted: 'Restricted page',
     },
+    headerStar: 'Like it? Star it on GitHub',
+    headerReview: 'Review it on the Chrome Web Store',
     xhsDefaultTitle: 'Feishu Document',
     wechatCopied: 'WeChat format copied. Paste it into the WeChat editor.',
     themePreview: {

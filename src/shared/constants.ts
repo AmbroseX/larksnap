@@ -259,14 +259,23 @@ export const UMAMI_WEBSITE_ID = '2825d17d-e96c-4ec0-813b-4e2144cc25c1';
 /** 开源项目主页 */
 export const REPO_URL = 'https://github.com/AmbroseX/larksnap';
 
-/** 错误反馈（GitHub Issues） */
+/** 错误反馈（GitHub Issues）：地址写死在代码里，设置页只展示不可改 */
 export const ISSUES_URL = 'https://github.com/AmbroseX/larksnap/issues';
+
+/** 「反馈问题」实际打开的新建 issue 页 */
+export const FEEDBACK_URL = `${ISSUES_URL}/new`;
+
+/** Chrome 应用商店页 */
+export const STORE_URL =
+  'https://chromewebstore.google.com/detail/gepndmikbdjpdedkfiejchmhmhegjeal';
+
+/** Chrome 应用商店的评价页（点星打分那一栏） */
+export const STORE_REVIEWS_URL = `${STORE_URL}/reviews`;
 
 /** 默认配置 */
 export const DEFAULT_CONFIG: ExtensionConfig = {
   language: 'auto',
   imageMode: 'download',
-  feedbackUrl: `${ISSUES_URL}/new`,
   diagnosticIncludeSnapshot: true,
   trustedDomains: [],
   webcopy: {

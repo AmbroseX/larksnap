@@ -1,6 +1,5 @@
-import { MSG } from '../shared/constants';
+import { FEEDBACK_URL, MSG } from '../shared/constants';
 import { sendToBackground } from '../shared/messaging';
-import { getConfig } from '../shared/storage';
 import { t } from '../shared/i18n';
 import { useI18n } from '../shared/i18n/useI18n';
 
@@ -12,14 +11,11 @@ export function Footer() {
   useI18n();
   const version = chrome.runtime.getManifest().version;
 
-  const openFeedback = async () => {
-    const config = await getConfig();
-    void chrome.tabs.create({ url: config.feedbackUrl });
-  };
+  const open = (url: string) => () => void chrome.tabs.create({ url });
 
   return (
     <div className="panel-footer">
-      <button type="button" className="pf-link" onClick={() => void openFeedback()}>
+      <button type="button" className="pf-link" onClick={open(FEEDBACK_URL)}>
         {t('actions.feedback.title')}
       </button>
       <span className="pf-sep">·</span>

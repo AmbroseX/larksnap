@@ -45,6 +45,11 @@ body {
   font-size: 17px;
   font-weight: 600;
   margin: 0;
+  /* 顶部按钮变多后，窄侧边栏优先保住按钮，标题不够放就省略 */
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
 }
 
 .title-row .close-btn {
@@ -1010,6 +1015,50 @@ body {
   background: rgba(0, 0, 0, 0.06);
 }
 
+/* header 图标按钮的悬停气泡：系统 title 要等一两秒才弹，自己画一个即时的。
+   气泡挂在按钮下方、右边缘对齐，免得最右的按钮把气泡顶出屏幕 */
+.hd-tip {
+  position: relative;
+}
+
+.hd-tip::after {
+  content: attr(data-tip);
+  position: absolute;
+  top: 100%;
+  right: 0;
+  margin-top: 4px;
+  padding: 4px 8px;
+  font-size: 11px;
+  line-height: 1.4;
+  white-space: nowrap;
+  color: #fff;
+  background: rgba(0, 0, 0, 0.8);
+  border-radius: 6px;
+  opacity: 0;
+  transform: translateY(-2px);
+  transition: opacity 0.12s ease, transform 0.12s ease;
+  pointer-events: none;
+  z-index: 30;
+}
+
+.hd-tip:hover::after,
+.hd-tip:focus-visible::after {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+/* ⭐ / 📝 两个支持入口：emoji 本身比 ⚙ 重，缩一号免得压过功能按钮 */
+.hd-cheer {
+  width: 24px;
+  height: 24px;
+  font-size: 14px;
+  opacity: 0.85;
+}
+
+.hd-cheer:hover {
+  opacity: 1;
+}
+
 .home-main {
   padding: 0 12px 12px;
 }
@@ -1243,6 +1292,7 @@ body {
   display: flex;
   align-items: center;
   justify-content: center;
+  flex-wrap: wrap;
   gap: 6px;
   padding: 6px 0 2px;
   font-size: 11px;

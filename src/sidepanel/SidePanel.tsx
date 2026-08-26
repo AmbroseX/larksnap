@@ -7,7 +7,7 @@ import type {
   RuntimeState,
   TaskRecord,
 } from '../shared/types';
-import { MSG, STORAGE_KEYS } from '../shared/constants';
+import { MSG, REPO_URL, STORAGE_KEYS, STORE_REVIEWS_URL } from '../shared/constants';
 import { sendToBackground, onBackgroundMessage } from '../shared/messaging';
 import { hostOf, originOf, permissionPattern } from '../shared/feishu-host';
 import { useI18n } from '../shared/i18n/useI18n';
@@ -341,26 +341,48 @@ export function SidePanel() {
             </button>
           </div>
           <span className="title-spacer" />
+          {/* 支持项目：Star 和商店评价，放顶部才看得见 */}
           <button
             type="button"
-            className="hd-icon-btn"
-            title={t('sidepanel.headerSettings')}
+            className="hd-icon-btn hd-cheer hd-tip"
+            data-tip={t('sidepanel.headerStar')}
+            aria-label={t('sidepanel.headerStar')}
+            onClick={() => void chrome.tabs.create({ url: REPO_URL })}
+          >
+            ⭐
+          </button>
+          <button
+            type="button"
+            className="hd-icon-btn hd-cheer hd-tip"
+            data-tip={t('sidepanel.headerReview')}
+            aria-label={t('sidepanel.headerReview')}
+            onClick={() => void chrome.tabs.create({ url: STORE_REVIEWS_URL })}
+          >
+            📝
+          </button>
+          <button
+            type="button"
+            className="hd-icon-btn hd-tip"
+            data-tip={t('sidepanel.headerSettings')}
+            aria-label={t('sidepanel.headerSettings')}
             onClick={() => chrome.runtime.openOptionsPage()}
           >
             ⚙
           </button>
           <button
             type="button"
-            className="hd-icon-btn"
-            title={t('sidepanel.headerCache')}
+            className="hd-icon-btn hd-tip"
+            data-tip={t('sidepanel.headerCache')}
+            aria-label={t('sidepanel.headerCache')}
             onClick={() => setView('cache')}
           >
             🗂
           </button>
           <button
             type="button"
-            className="close-btn"
-            title={t('sidepanel.closeTitle')}
+            className="close-btn hd-tip"
+            data-tip={t('sidepanel.closeTitle')}
+            aria-label={t('sidepanel.closeTitle')}
             onClick={() => window.close()}
           >
             ✕

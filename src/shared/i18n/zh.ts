@@ -23,6 +23,13 @@ export const zh = {
       link: '保留在线链接',
     },
     feedbackUrl: '反馈页面地址',
+    feedbackFixed: '固定为项目的 GitHub Issues，不可修改；点下面的地址直接去提问题。',
+    support: {
+      title: '支持项目',
+      desc: '觉得好用的话，给个 Star 或者去商店写句评价，都能帮到这个项目。',
+      star: '⭐ 去 GitHub 点 Star',
+      review: '📝 去 Chrome 商店评价',
+    },
     shortcuts: {
       label: '键盘快捷键',
       desc: '打开面板 Ctrl/Cmd+Shift+L · 整页转 Markdown Ctrl/Cmd+Shift+M · 整页截图 Ctrl/Cmd+Shift+S；「AI 总结」默认未设键，可自行配置。',
@@ -156,6 +163,8 @@ export const zh = {
       generic: '网页',
       restricted: '受限页面',
     },
+    headerStar: '好用的话给个 Star ⭐',
+    headerReview: '去 Chrome 商店写个评价',
     xhsDefaultTitle: '飞书文档',
     wechatCopied: '已复制公众号格式，去公众号编辑器粘贴即可',
     themePreview: {

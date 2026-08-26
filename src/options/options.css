@@ -154,3 +154,27 @@ body {
 .privacy-section > summary::-webkit-details-marker {
   display: none;
 }
+
+/* 外链按钮：反馈地址与「支持项目」共用，看着像按钮但本质是 <a> 新标签打开 */
+.link-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.link-btn {
+  display: inline-block;
+  padding: 6px 12px;
+  font-size: 12px;
+  color: #374151;
+  text-decoration: none;
+  background: #fff;
+  border: 1px solid #d1d5db;
+  border-radius: 6px;
+  word-break: break-all;
+}
+
+.link-btn:hover {
+  border-color: #3370ff;
+  color: #3370ff;
+}
