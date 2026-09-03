@@ -138,6 +138,16 @@ export const CONTENT_MSG = {
   GET_SNAPSHOT: 'get_snapshot',
   /** 代发飞书内部接口（同源 fetch）：data={ method, path, body? } */
   FEISHU_REQUEST: 'feishu_request',
+  /**
+   * 批量补拉 client_vars 子树（表格等 skip_blocks）：
+   * data={ objToken, wikiPart, blockIds }，响应 { pages: block_map[] }。
+   *
+   * 为什么单独开一个消息：表格多的文档补拉能翻出上百个请求（实测 161 个），
+   * 逐个走 FEISHU_REQUEST 就是上百次 SW ⇄ content 往返，稳稳超过 MV3
+   * Service Worker 的 30 秒空闲回收线。这里让 content 自己把整批翻完，
+   * 往返从 N 次降到 1 次。合并仍由 SW 做（mergeBlockMap），不在两边各写一份。
+   */
+  FEISHU_SUBTREES: 'feishu_subtrees',
   /** 下载媒体二进制（content 同源 fetch → base64）：data={ token, objToken } */
   DOWNLOAD_MEDIA: 'download_media',
   /** 滚动加载全文（懒加载内容） */

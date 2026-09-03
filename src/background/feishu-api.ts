@@ -1,5 +1,5 @@
 import type { DocInfo } from '../shared/types';
-import { feishuGet, feishuPost } from './feishu-proxy';
+import { feishuGet, feishuPost, fetchSubtrees } from './feishu-proxy';
 
 /**
  * 飞书内部接口路径封装（集中管理，§8 风险:接口变更只需改这里）。
@@ -237,31 +237,26 @@ export async function fetchClientVars(doc: ResolvedDoc): Promise<Json> {
   }
 
   // 补拉被跳过的子树：mode=4 + block_id（表格单元格及其正文块从这里来）
-  const pending = [...skipped];
-  const done = new Set<string>();
-  while (pending.length && done.size < 50) {
-    const bid = pending.shift()!;
-    if (done.has(bid)) continue;
-    done.add(bid);
-    let subCursor = '';
-    let subMore = true;
-    let subGuard = 0;
-    while (subMore && subGuard < 50) {
-      subGuard++;
-      const page = (await feishuGet(
-        `/space/api/docx/pages/client_vars?id=${doc.objToken}&mode=4&block_id=${bid}&cursor=${encodeURIComponent(
-          subCursor
-        )}&limit=239${wikiPart}`
-      )) as Json;
-      const pd = (page.data ?? {}) as Record<string, unknown>;
-      mergeBlockMap(blockMap, (pd.block_map ?? {}) as Record<string, unknown>);
-      // 子树里可能还有下一层被跳过的块，入队继续补
-      for (const s of (pd.skip_blocks as string[]) ?? []) {
-        if (!done.has(String(s))) pending.push(String(s));
-      }
-      subMore = Boolean(pd.has_more);
-      subCursor = (pd.cursor as string) ?? '';
-      if (!subCursor) break;
+  //
+  // ⚠️ 整批交给 content 一次拉完，**不要改回在这里逐个 feishuGet**。
+  // 表格多的文档这里能翻出上百个请求（实测一篇 13 个子树翻出 161 个请求），
+  // 逐个代发就是上百次 SW ⇄ content 往返，会撞爆 MV3 Service Worker 的 30 秒
+  // 空闲回收线（症状：随机报 Failed to fetch / 消息通道关闭 / 打开文档超时）。
+  // 详见 docs/plans/2026-09-03-大表格文档抓取超时修复.md。
+  //
+  // 分工：content 只管把页拉回来（内部并发 4 + 按 cursor 翻页），
+  //       合并留在这里做——mergeBlockMap 要对 children 取并集，只此一份。
+  if (skipped.size > 0) {
+    const sub = await fetchSubtrees({
+      objToken: doc.objToken,
+      wikiPart,
+      blockIds: [...skipped],
+    });
+    for (const pageMap of sub.pages) mergeBlockMap(blockMap, pageMap);
+    if (sub.truncated) {
+      console.warn(
+        `[larksnap] 补拉撞到 50 块上限，表格内容可能不全（已拉 ${sub.requests} 个请求）`
+      );
     }
   }
 

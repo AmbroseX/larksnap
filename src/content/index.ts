@@ -1,6 +1,7 @@
 import { CONTENT_MSG } from '../shared/constants';
 import { detectCurrentDoc } from './feishu-detect';
 import { feishuGet, feishuPost } from './api/request';
+import { fetchSubtrees, type SubtreeRequest } from './api/client-vars';
 import { downloadMediaByUrls } from './api/media';
 import { captureSnapshot, scrollLoadAll } from './snapshot';
 
@@ -35,6 +36,11 @@ async function handleAsync(msg: { type: string; data?: unknown }): Promise<unkno
       return { success: true, data };
     }
 
+    case CONTENT_MSG.FEISHU_SUBTREES: {
+      const data = await fetchSubtrees(msg.data as SubtreeRequest);
+      return { success: true, data };
+    }
+
     case CONTENT_MSG.DOWNLOAD_MEDIA: {
       const { urls } = msg.data as { urls: string[] };
       const data = await downloadMediaByUrls(urls);
@@ -66,6 +72,7 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   // 异步消息：保持通道开启，Promise 完成后回传
   if (
     msg?.type === CONTENT_MSG.FEISHU_REQUEST ||
+    msg?.type === CONTENT_MSG.FEISHU_SUBTREES ||
     msg?.type === CONTENT_MSG.DOWNLOAD_MEDIA ||
     msg?.type === CONTENT_MSG.SCROLL_LOAD ||
     msg?.type === CONTENT_MSG.GET_SNAPSHOT

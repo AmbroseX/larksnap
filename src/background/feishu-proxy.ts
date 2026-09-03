@@ -75,6 +75,26 @@ export async function feishuGet<T = unknown>(path: string): Promise<T> {
 }
 
 /**
+ * 批量补拉 client_vars 子树（经 content 同源代发，**一次往返拉完整批**）。
+ *
+ * 表格多的文档补拉能翻出上百个请求，逐个走 feishuGet 就是上百次 SW ⇄ content
+ * 往返，会把 MV3 Service Worker 的 30 秒空闲回收线撞爆。这里让 content 自己翻完，
+ * SW 只等一个 promise。返回的是**未合并的每页 block_map**，合并仍在 SW 侧做。
+ */
+export async function fetchSubtrees(req: {
+  objToken: string;
+  wikiPart: string;
+  blockIds: string[];
+}): Promise<{
+  pages: Record<string, unknown>[];
+  requests: number;
+  truncated: boolean;
+}> {
+  const tabId = await activeContentTab();
+  return send(tabId, { type: CONTENT_MSG.FEISHU_SUBTREES, data: req });
+}
+
+/**
  * POST 内部接口（经 content 同源代发，带 CSRF）。
  * opts.form=true 走表单编码（explorer/create 一类接口只认表单）。
  */
