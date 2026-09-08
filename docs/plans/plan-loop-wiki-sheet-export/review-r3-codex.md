@@ -1,0 +1,17 @@
+VERDICT: score=5 critical=0 major=4 minor=3
+
+- **major** — [v3.md:108-118](/Users/ambrose/WorkSpace/Code/work/larksnap/docs/plans/plan-loop-wiki-sheet-export/v3.md:108)，对照 [brief.md:约 70-95](/Users/ambrose/WorkSpace/Code/work/larksnap/docs/plans/plan-loop-wiki-sheet-export/brief.md:70)。方案明确要求“三者皆无”时通过 `feishu-api.ts` 解析 `obj_type`，但 v3 选择“不实现 C 层”。因此 `/wiki/<token>` 没有 query、当前模型尚未挂载、或模型位于不可探测 frame 时，方案只能退回 `exportMarkdown` 并报空，无法判断并处理 wiki sheet/bitable；wiki-bitable 也没有可行的 Excel 路径。改法：至少实现 `resolveObjToken` 返回 `objType`，定义 sheet/bitable 的真实数值并在模型未探测到时使用；如果 `obj_type` 只能产生提示，也必须明确把该场景列为“不支持”，不能把它写成已覆盖。
+
+- **major** — [v3.md:328-337](/Users/ambrose/WorkSpace/Code/work/larksnap/docs/plans/plan-loop-wiki-sheet-export/v3.md:328)，对照 [sheet.ts:282-294](/Users/ambrose/WorkSpace/Code/work/larksnap/src/background/exporters/sheet.ts:282)。`pickModelFrameId` 对 `sheet` 类型把 `sheetModel`（只要有 `window.spread`）和 `sheetApp`（真正的 `spreadApp`）混为同一定位信号，并优先主 frame。若主 frame 有普通 docx 内嵌表格的 `window.spread`，实际 `spreadApp` 在子 frame，函数会选错主 frame，随后 `exportSheet` 仍找不到 `spreadApp`。这正是方案声称要解决的 iframe 情形。改法：sheet 定位先选 `sheetApp` 命中的 frame；仅当没有 `sheetApp` 时，才回退到 `sheetModel`，并为该回退明确走 `window.spread` 抽取器。
+
+- **major** — [v3.md:297-304](/Users/ambrose/WorkSpace/Code/work/larksnap/docs/plans/plan-loop-wiki-sheet-export/v3.md:297)，对照 Chrome `executeScript({ allFrames: true })` 的实际失败边界。一次 all-frame 注入只要遇到不可注入的跨源/特殊 frame，就整体进入 `catch` 返回 `[]`。对 URL 已判定的 sheet，后续仍会用未定义 `frameId` 只注主 frame；模型若在子 frame，直接失败。对未判定 wiki，则会误走普通 docx 管线。改法：先单独探测主 frame，再逐个可访问 frame 探测并合并；至少不能把 all-frame 整体异常静默等价为“没有模型”。
+
+- **major** — [v3.md:444-469](/Users/ambrose/WorkSpace/Code/work/larksnap/docs/plans/plan-loop-wiki-sheet-export/v3.md:444)，对照 [bridge.ts:467-510](/Users/ambrose/WorkSpace/Code/work/larksnap/src/background/bridge.ts:467)。CLI wiki-sheet 的成功依赖后台 `active:false` 标签页中的 `spreadApp`、点击 tab、定时器和布局坐标；仓库现有实测只证明 `window.spread` 在隐藏页加载，未证明 `spreadApp` 或 `clickTab` 可用。v3 把验证失败后的“明确报错”当可接受降级，却仍把 CLI wiki-sheet 列入修复路径，主需求没有可行性保证。改法：落地前先验证现有 `/sheets/` 直链和 wiki 链接；若隐藏页失败，必须无条件接入前台切换/恢复机制或明确声明 CLI wiki-sheet 不支持，不应以“条件项”宣称已修复。
+
+- **minor** — [v3.md:89-92](/Users/ambrose/WorkSpace/Code/work/larksnap/docs/plans/plan-loop-wiki-sheet-export/v3.md:89)。`?sheet=` 和 `?table=tbl...` 被直接作为 wiki 类型分类，但真实 wiki-bitable 链接尚未取得，`?sheet=` 是否只表示当前节点就是整页表格也未被证明。若普通 wiki 文档或嵌入视图复用了这些参数，会被错误送入专用 exporter。改法：URL 参数只能作为候选信号；必须由结构模型或 `obj_type` 二次确认，至少增加带 query 的普通 wiki 回归用例。
+
+- **minor** — [v3.md:312-315](/Users/ambrose/WorkSpace/Code/work/larksnap/docs/plans/plan-loop-wiki-sheet-export/v3.md:312)，对照 [bitable.ts:129-131,176](/Users/ambrose/WorkSpace/Code/work/larksnap/src/background/exporters/bitable.ts:129)。探测用 `Object.keys(base.blocks).length`，抽取器用 `arr(base.blocks)`，两处对 blocks 容器的支持不一致；若 SDK 返回数组尚可，若返回其他可枚举/类 Map 结构，分类和实际抽取会出现不同结论。改法：复用 exporter 的同一容器归一化逻辑，并用真实 `base.blocks` 形状验证。
+
+- **minor** — [v3.md:448-468](/Users/ambrose/WorkSpace/Code/work/larksnap/docs/plans/plan-loop-wiki-sheet-export/v3.md:448)。bridge 重新手写 `probeFrames → pickWikiKind → pickModelFrameId`，没有调用拟新增的 `prepareFeishuDoc`，形成两个分流入口。后续修改识别优先级或 frame 选择时，侧边栏和 CLI 会漂移。改法：抽出不依赖侧边栏状态的公共 `prepare` helper，或至少让 bridge 复用同一分类/定位函数并补桥接单测。
+
+结论：当前方案能覆盖带明确 `?sheet=` 且模型位于主 frame 的部分路径，但对无 query、子 frame、隐藏桥接页和 wiki-bitable 的关键场景仍依赖未经验证的假设，不能达到“可直接照着实现并为成败背书”的标准。
