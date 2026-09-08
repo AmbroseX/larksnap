@@ -67,6 +67,18 @@ async function getDeviceId(): Promise<string> {
   return id;
 }
 
+/**
+ * 浏览器时区（如 Asia/Shanghai / America/New_York），取不到就报空串。
+ * 只用来看用户大致分布在哪些城市群，粒度粗、不含任何身份信息，也不依赖 IP。
+ */
+function localTimeZone(): string {
+  try {
+    return Intl.DateTimeFormat().resolvedOptions().timeZone || '';
+  } catch {
+    return '';
+  }
+}
+
 /** 本地日期（按浏览器所在时区取 YYYY-MM-DD），作为「今天报过没」的判据。 */
 function localDay(): string {
   const d = new Date();
@@ -78,7 +90,8 @@ function localDay(): string {
 /**
  * 日活心跳：同一台设备一天只上报一次。
  * 因为本地按天去重了，某天的 active 事件总数就≈当天活跃设备数（不用依赖服务端去重）；
- * did 让 Umami 还能进一步算「同一设备跨天回访」的留存。
+ * did 让 Umami 还能进一步算「同一设备跨天回访」的留存；
+ * tz 让 Umami 能按时区看用户分布在哪些城市群（不用等服务端 IP 解析）。
  */
 async function pingDailyActive(): Promise<void> {
   try {
@@ -91,7 +104,7 @@ async function pingDailyActive(): Promise<void> {
 
     await chrome.storage.local.set({ [STORAGE_KEYS.LAST_ACTIVE]: today });
     const did = await getDeviceId();
-    void track({ name: 'active', url: '/lifecycle/active', data: { did } });
+    void track({ name: 'active', url: '/lifecycle/active', data: { did, tz: localTimeZone() } });
   } catch {
     // 静默
   }
