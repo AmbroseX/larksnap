@@ -28,6 +28,8 @@ import { findAdapter } from './webcopy-adapters';
 import { setProgressSink } from './progress';
 import { exportMarkdown } from './exporters/markdown';
 import { exportSheet } from './exporters/sheet';
+import { exportBitable } from './exporters/bitable';
+import { resolveWikiDocType } from './feishu-api';
 import { exportPdf } from './exporters/pdf';
 import { exportHtml } from './exporters/html';
 import { track } from './analytics';
@@ -521,11 +523,17 @@ async function runJob(job: Job): Promise<void> {
       }
     }
 
+    // wiki 链接看不出里面装的是文档还是表格，问一次服务端（只认表格，其余原样返回）
+    doc = await resolveWikiDocType(doc);
+
     const fmt = (job.format || 'md').toLowerCase();
     let res: Response;
     if (doc.docType === 'sheets') {
       // 电子表格：无论请求什么格式，都走内存抽取 → Markdown + CSV（打包 zip）
       res = await exportSheet(doc);
+    } else if (doc.docType === 'base') {
+      // 多维表格：只能出 Excel（记录只在页面内存里，没有可导出的文档块）
+      res = await exportBitable(doc);
     } else if (fmt === 'pdf') res = await exportPdf(doc);
     else if (fmt === 'html') res = await exportHtml(doc);
     else res = await exportMarkdown(doc);

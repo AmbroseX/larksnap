@@ -12,6 +12,7 @@ import { t, type TranslationKey } from '../shared/i18n';
 import { track } from './analytics';
 import { runTracked } from './badge';
 import { detectDocForTab } from './doc-detect';
+import { resolveWikiDocType } from './feishu-api';
 import { getContentTab, setContentTab } from './feishu-proxy';
 import { exportMarkdown } from './exporters/markdown';
 import { exportSheet } from './exporters/sheet';
@@ -147,15 +148,17 @@ const ROUTES: Record<ActionId, ActionRoute> = {
 
 /** 多维表格导出 Excel：识别 tab → 就绪校验 → 只放行 base 类型 → 读内存出 xlsx */
 async function runExcelExport(ctx: DispatchContext): Promise<Response> {
-  const doc = await detectDocForTab(ctx.tabId);
-  const err = requireReady(doc);
+  const detected = await detectDocForTab(ctx.tabId);
+  const err = requireReady(detected);
   if (err) return err;
-  if (doc!.docType !== 'base') {
-    return { success: false, error: t('bg.excelOnlyBase') };
-  }
-  return withContentTab(ctx.tabId, () =>
-    trackedExport('excel', () => exportBitable(doc!))
-  );
+  return withContentTab(ctx.tabId, async () => {
+    // wiki 节点里也可能装着多维表格，先问一次服务端
+    const doc = await resolveWikiDocType(detected!);
+    if (doc.docType !== 'base') {
+      return { success: false, error: t('bg.excelOnlyBase') };
+    }
+    return trackedExport('excel', () => exportBitable(doc));
+  });
 }
 
 /**
@@ -204,25 +207,27 @@ async function runFeishuExport(
   ctx: DispatchContext,
   kind: 'markdown' | 'pdf' | 'html'
 ): Promise<Response> {
-  const doc = await detectDocForTab(ctx.tabId);
-  const err = requireReady(doc);
+  const detected = await detectDocForTab(ctx.tabId);
+  const err = requireReady(detected);
   if (err) return err;
-  // 多维表格只支持导出 Excel，md/pdf/html 都不适用
-  const baseBlocked = blockBaseOnly(doc!);
-  if (baseBlocked) return baseBlocked;
-  return withContentTab(ctx.tabId, () => {
+  return withContentTab(ctx.tabId, async () => {
+    // wiki 链接看不出里面装的是文档还是表格，问一次服务端（只认表格，其余原样返回）
+    const doc = await resolveWikiDocType(detected!);
+    // 多维表格只支持导出 Excel，md/pdf/html 都不适用
+    const baseBlocked = blockBaseOnly(doc);
+    if (baseBlocked) return baseBlocked;
     if (kind === 'markdown') {
       // 电子表格走专门的内存抽取导出（docx 那套 client_vars 对表格是空的）
-      const isSheet = doc!.docType === 'sheets';
+      const isSheet = doc.docType === 'sheets';
       return trackedExport(isSheet ? 'sheet' : 'markdown', () =>
-        isSheet ? exportSheet(doc!) : exportMarkdown(doc!)
+        isSheet ? exportSheet(doc) : exportMarkdown(doc)
       );
     }
-    const blocked = blockSheetOnly(doc!);
-    if (blocked) return Promise.resolve(blocked);
+    const blocked = blockSheetOnly(doc);
+    if (blocked) return blocked;
     return kind === 'pdf'
-      ? trackedExport('pdf', () => exportPdf(doc!))
-      : trackedExport('html', () => exportHtml(doc!));
+      ? trackedExport('pdf', () => exportPdf(doc))
+      : trackedExport('html', () => exportHtml(doc));
   });
 }
 

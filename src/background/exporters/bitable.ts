@@ -105,7 +105,7 @@ export async function exportBitable(doc: DocInfo): Promise<Response> {
  *
  * 已实测于讯飞白牌（飞书底座）bitable；字段/方法名随 SDK 版本可能漂移。
  */
-function extractBitableInPage(): {
+async function extractBitableInPage(): Promise<{
   title: string;
   tables: {
     id: string;
@@ -115,7 +115,8 @@ function extractBitableInPage(): {
     total: number;
   }[];
   error?: string;
-} {
+}> {
+  const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
   const EMPTY = {
     title: '',
     tables: [] as {
@@ -129,17 +130,36 @@ function extractBitableInPage(): {
   const arr = (o: any): any[] =>
     Array.isArray(o) ? o : o && typeof o === 'object' ? Object.values(o) : [];
 
+  // 后台标签页定时器有节流，模型出现得慢；wiki 壳里还要多等一层外壳加载，
+  // 所以轮询等到数据根就绪为止，别一进来读不到就判死。
+  let store: any = null;
+  let svc: any = null;
+  for (let i = 0; i < 24; i++) {
+    store = (window as unknown as { bitableStore?: any }).bitableStore ?? null;
+    svc = store
+      ? arr(store.services).find((x: any) => x && x.modelOperator && x.modelOperator.base)
+      : null;
+    if (svc) break;
+    await sleep(500);
+  }
+
   try {
-    const store = (window as unknown as { bitableStore?: any }).bitableStore;
     if (!store) {
+      // 带上页面相关全局变量名，下次不用再单独跑一轮探测就能定位
+      let keys = '';
+      try {
+        keys = Object.keys(window)
+          .filter((k) => /bitable|base|table|grid/i.test(k))
+          .slice(0, 20)
+          .join(', ');
+      } catch {
+        /* 忽略 */
+      }
       return {
         ...EMPTY,
-        error: '未找到多维表格数据模型（bitableStore），页面可能未加载完成或不是多维表格',
+        error: `未找到多维表格数据模型（bitableStore），页面可能未加载完成或不是多维表格。页面相关全局变量：${keys || '无'}`,
       };
     }
-    const svc = arr(store.services).find(
-      (s: any) => s && s.modelOperator && s.modelOperator.base
-    );
     const base = svc && svc.modelOperator.base;
     if (!base) {
       return { ...EMPTY, error: '多维表格模型结构不匹配（SDK 版本可能已变化）' };

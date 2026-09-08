@@ -60,6 +60,8 @@ export async function exportSheet(doc: DocInfo): Promise<Response> {
     }
 
     await reportProgress('markdown', 'running', t('progress.sheet.converting'), 70);
+    // 表格页的 DOM 标题选择器会命中侧边面板一类的无关元素（实测拿到「函数公式」），
+    // 所以优先用页面内抽取的 document.title，DocInfo 的标题只作兜底
     const title = wb.title || doc.title || doc.token;
     const files = buildFiles(title, sheets);
 
@@ -279,16 +281,49 @@ function extractWorkbookInPage(): Promise<{
   const EMPTY = { title: '', sheets: [] as { id: string; name: string; rows: string[][] }[] };
 
   const run = async () => {
-    const app = (window as unknown as { spreadApp?: any }).spreadApp;
-    if (!app) return { ...EMPTY, error: '未找到表格应用实例（spreadApp），页面可能未加载完成或不是电子表格' };
+    const w = window as unknown as { spreadApp?: any; spread?: any };
+    const quiet = (fn: () => any): any => {
+      try {
+        return fn();
+      } catch {
+        return null;
+      }
+    };
 
-    let cs: any, spread: any;
-    try {
-      cs = app.collaborativeSpread;
-      spread = app.shell.viewModelManager.spread;
-    } catch {
-      return { ...EMPTY, error: '表格模型结构不匹配（SDK 版本可能已变化）' };
+    // 表格模型挂在哪个全局变量上，取决于页面外壳：独立表格页是 spreadApp，
+    // wiki 壳 / docx 内嵌块见过 spread。两个都试，取到谁用谁。
+    // 后台标签页定时器有节流，模型出现得慢，留足轮询窗口。
+    let app: any = null;
+    let spread: any = null;
+    for (let i = 0; i < 24; i++) {
+      app = w.spreadApp ?? null;
+      spread = app ? quiet(() => app.shell.viewModelManager.spread) : null;
+      if (!spread) spread = w.spread ?? null;
+      if (spread) break;
+      await sleep(500);
     }
+    if (!spread) {
+      // 带上页面相关全局变量名，下次不用再单独跑一轮探测就能定位
+      const keys = quiet(() =>
+        Object.keys(window)
+          .filter((k) => /spread|sheet|bitable|grid|table/i.test(k))
+          .slice(0, 20)
+          .join(', ')
+      );
+      return {
+        ...EMPTY,
+        error: `未找到表格模型（spreadApp / spread 都不在），页面可能未加载完成或不是电子表格。页面相关全局变量：${keys || '无'}`,
+      };
+    }
+
+    // 取当前激活的表：协同实例优先，退回 spread 自身
+    const cs = {
+      getActiveSheet: () => {
+        const viaApp = app && quiet(() => app.collaborativeSpread?.getActiveSheet());
+        if (viaApp) return viaApp;
+        return quiet(() => spread.getActiveSheet());
+      },
+    };
     const list: { id: string; name: string }[] = (() => {
       try {
         return spread.sheets.map((s: any) => ({ id: String(s.id()), name: String(s.name()) }));
@@ -324,7 +359,7 @@ function extractWorkbookInPage(): Promise<{
 
     const countTop = (name: string): { ready: boolean; n: number } => {
       const s = cs.getActiveSheet();
-      if (s.name() !== name) return { ready: false, n: 0 };
+      if (!s || s.name() !== name) return { ready: false, n: 0 };
       const R = Math.min(s.getRowCount(), 50);
       const C = s.getColumnCount();
       let n = 0;
@@ -341,6 +376,7 @@ function extractWorkbookInPage(): Promise<{
 
     const readActive = (): { id: string; name: string; rows: string[][] } => {
       const s = cs.getActiveSheet();
+      if (!s) return { id: '', name: '', rows: [] };
       const R = s.getRowCount();
       const C = s.getColumnCount();
       const g: string[][] = [];
@@ -379,9 +415,12 @@ function extractWorkbookInPage(): Promise<{
       sheets.push(readActive());
     }
 
+    // ⚠️ 只砍「空格 + 分隔符 + 空格」的站点后缀（如「 - 飞书云文档」）。
+    // 早先写的是 /\s*[-–—].*$/，\s* 能匹配 0 个空格，
+    // 「2026-Turing-星火智能体平台」会被砍成「2026」。
     const title = document.title
       .replace(/[​-‏‪-‮⁠-⁯﻿]/g, '')
-      .replace(/\s*[-–—].*$/, '')
+      .replace(/\s+[-–—]\s+.*$/, '')
       .trim();
     return { title, sheets };
   };

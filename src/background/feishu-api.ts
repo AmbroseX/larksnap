@@ -17,6 +17,8 @@ export interface ResolvedDoc {
   spaceId?: string;
   /** 文档标题（尽力） */
   title?: string;
+  /** wiki 节点里装的真实文档类型（get_node 的 obj_type），直链文档为 undefined */
+  objType?: number;
 }
 
 interface Json {
@@ -58,7 +60,50 @@ export async function resolveObjToken(doc: DocInfo): Promise<ResolvedDoc> {
     // 但 get_node 的响应里带 space_id，用它兜底，client_vars 翻页更稳。
     spaceId: spaceId ?? (n?.space_id != null ? String(n.space_id) : undefined),
     title: (n?.title as string) ?? doc.title,
+    objType: Number.isFinite(Number(n?.obj_type)) ? Number(n?.obj_type) : undefined,
   };
+}
+
+/**
+ * wiki 节点里装的到底是不是表格。
+ *
+ * wiki 链接看不出内容类型（`/wiki/<token>` 就这么一段），不问服务端就只能当
+ * docx 处理，而表格的数据根本不在文档块里，导出会落一个空文件。
+ *
+ * 判据用两条，互为兜底：
+ * - `obj_type`：3 = 电子表格（2026-09-07 在讯飞私有化租户实测确认），8 = 多维表格；
+ * - `obj_token` 前缀：`sht` = 电子表格，`bas` = 多维表格，飞书长期稳定的公开事实。
+ *
+ * 只有明确认出表格才回答，其余一律返回 null 让调用方保持原样——已经能正常导出的
+ * 文档不该因为这个判断改道。
+ */
+export function sheetKindOf(objType?: number, objToken?: string): 'sheets' | 'base' | null {
+  const tok = String(objToken ?? '');
+  if (objType === 3 || /^sht/i.test(tok)) return 'sheets';
+  if (objType === 8 || /^bas/i.test(tok)) return 'base';
+  return null;
+}
+
+/**
+ * 把 wiki 类型的 DocInfo 换成它真正装的类型（只认表格，见 sheetKindOf）。
+ *
+ * ⚠️ 只改 docType，**不改 token**：拿 obj_token 开 `/sheets/<token>` 直链会被
+ * 服务端 302 跳回 wiki 地址（2026-09-07 实测），页面自始至终是 wiki 壳；而表格
+ * 导出读的是页面内存，用不到 token。
+ *
+ * 解析失败（接口报错 / 未登录 / 不是表格）一律原样返回，不打断原有流程。
+ */
+export async function resolveWikiDocType(doc: DocInfo): Promise<DocInfo> {
+  if (doc.docType !== 'wiki') return doc;
+  try {
+    const resolved = await resolveObjToken(doc);
+    const kind = sheetKindOf(resolved.objType, resolved.objToken);
+    if (!kind) return doc;
+    // 服务端标题最权威：表格页的 DOM 标题选择器会命中无关元素（实测拿到「函数公式」）
+    return { ...doc, docType: kind, title: resolved.title || doc.title || '' };
+  } catch {
+    return doc;
+  }
 }
 
 /** 从 tree/get_info 响应里尽力找 space_id */
