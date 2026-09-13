@@ -216,6 +216,13 @@ async function handleMessage(
       return dispatchAction('feishu-excel', ctx);
     }
 
+    // ---------- 转存到飞书（任意网页 → 飞书云文档，「剪存」通道） ----------
+    case MSG.CLIP_TO_FEISHU: {
+      const ctx = await capturePanelCtx();
+      if (!ctx) return noActiveTab();
+      return dispatchAction('clip-to-feishu', ctx);
+    }
+
     case MSG.EXPORT_XHS: {
       const ctx = await capturePanelCtx();
       if (!ctx) return noActiveTab();
