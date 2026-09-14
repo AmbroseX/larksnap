@@ -57,6 +57,7 @@ describe('buildMenuSpecs 菜单集合', () => {
     expect(generic.map((s) => s.id)).toEqual([
       'menu-page-md',
       'menu-page-md-dl',
+      'menu-page-clip',
       'menu-selection-md',
       'menu-ask-ai-sum',
       'menu-ask-ai-translate',

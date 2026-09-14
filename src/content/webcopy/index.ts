@@ -3,6 +3,7 @@ import { ensureI18n, t } from '../../shared/i18n';
 import { getConfig } from '../../shared/storage';
 import type { WebCopyState } from '../../shared/types';
 import { pageToMarkdown, selectionToMarkdown } from './html2md';
+import { extractArticle } from './extract';
 import { startUnlock, stopUnlock, isUnlocked } from './unlock';
 import { applyAutoCopyConfig } from './auto-copy';
 import { writeClipboard } from './clipboard';
@@ -43,7 +44,8 @@ function mount(): void {
       msg?.type !== CONTENT_MSG.WEBCOPY_PAGE_TO_MD &&
       msg?.type !== CONTENT_MSG.WEBCOPY_SELECTION_TO_MD &&
       msg?.type !== CONTENT_MSG.WEBCOPY_UNLOCK &&
-      msg?.type !== CONTENT_MSG.WEBCOPY_STATE
+      msg?.type !== CONTENT_MSG.WEBCOPY_STATE &&
+      msg?.type !== CONTENT_MSG.WEBCOPY_CLIP_HTML
     ) {
       return false;
     }
@@ -106,7 +108,35 @@ async function handle(msg: { type: string; data?: unknown }): Promise<unknown> {
       return { success: true, data: state };
     }
 
+    case CONTENT_MSG.WEBCOPY_CLIP_HTML: {
+      // 剪存转存：取 Defuddle 正文 HTML 包成最小文档（飞书解析服务直接吃）
+      const article = extractArticle();
+      const title = article.meta.title || document.title || location.hostname;
+      const body =
+        article.source === 'raw-text' || article.source === 'pre'
+          ? `<pre>${escapeHtml(article.text ?? '')}</pre>`
+          : article.contentHtml;
+      const source = escapeHtml(location.href);
+      const html = [
+        '<!doctype html><html><head><meta charset="utf-8">',
+        `<title>${escapeHtml(title)}</title></head><body>`,
+        `<h1>${escapeHtml(title)}</h1>`,
+        body,
+        `<hr><p>来源：<a href="${source}">${source}</a></p>`,
+        '</body></html>',
+      ].join('');
+      return { success: true, data: { html, title } };
+    }
+
     default:
       return { success: false, error: t('bg.unknownWebcopyMessage', { type: msg.type }) };
   }
+}
+
+function escapeHtml(s: string): string {
+  return s
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
 }

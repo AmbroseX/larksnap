@@ -28,6 +28,7 @@ vi.mock('./exporters/screenshot', () => ({
   exportScreenshot: vi.fn(async () => ({ success: true })),
 }));
 vi.mock('./summarize', () => ({ summarizePage: vi.fn(async () => ({ success: true })) }));
+vi.mock('./clip/clip-page', () => ({ clipPageToFeishu: vi.fn(async () => ({ success: true })) }));
 vi.mock('./webcopy', () => ({
   toastInMainWorld: vi.fn(async () => {}),
   webcopyPageMd: vi.fn(async () => ({ success: true })),
@@ -45,6 +46,7 @@ import { exportMarkdown } from './exporters/markdown';
 import { exportPdf } from './exporters/pdf';
 import { exportScreenshot } from './exporters/screenshot';
 import { summarizePage } from './summarize';
+import { clipPageToFeishu } from './clip/clip-page';
 import { webcopyPageMd, webcopyPageMdInPage } from './webcopy';
 
 const ALL_ACTIONS: ActionId[] = [
@@ -59,6 +61,8 @@ const ALL_ACTIONS: ActionId[] = [
   'feishu-md',
   'feishu-pdf',
   'feishu-html',
+  'feishu-excel',
+  'clip-to-feishu',
 ];
 
 const CTX_PANEL: DispatchContext = { tabId: 42, url: 'https://example.com/a', source: 'panel' };
@@ -150,6 +154,14 @@ describe('tabId 显式透传（评审阻断项 1）', () => {
     expect(res.success).toBe(true);
     expect(detectDocForTab).toHaveBeenCalledWith(42);
     expect(exportMarkdown).toHaveBeenCalled();
+    expect(tabsQuery).not.toHaveBeenCalled();
+  });
+
+  it('clip-to-feishu：tabId/url 原样传给编排器，不做飞书文档就绪校验（任意页可转存）', async () => {
+    const res = await dispatchAction('clip-to-feishu', CTX_PANEL);
+    expect(res.success).toBe(true);
+    expect(clipPageToFeishu).toHaveBeenCalledWith(42, CTX_PANEL.url);
+    expect(detectDocForTab).not.toHaveBeenCalled();
     expect(tabsQuery).not.toHaveBeenCalled();
   });
 });

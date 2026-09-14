@@ -41,6 +41,7 @@ export type ExportAction =
   | 'xhs'
   | 'wechat'
   | 'attachments'
+  | 'clip'
   | 'cache'
   | 'cacheList'
   | 'diagnostic'
@@ -569,7 +570,8 @@ export type ActionId =
   | 'feishu-md'
   | 'feishu-pdf'
   | 'feishu-html'
-  | 'feishu-excel';
+  | 'feishu-excel'
+  | 'clip-to-feishu';
 
 /**
  * 动作分发上下文：触发瞬间捕获目标标签页，全链路显式传递。
