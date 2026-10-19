@@ -191,6 +191,13 @@ function renderBlock(id: string, depth: number, ctx: Ctx): string {
     case type.includes('whiteboard') || type === 'board':
       return renderWhiteboard(block, ctx);
 
+    // 文本绘图小组件：公众号跑不了 Mermaid，按代码块展示源码
+    case type === 'isv' && typeof block.extra.diagramSource === 'string':
+      return (
+        `<section style="margin:10px 0 -4px;color:#8a919f;font-size:13px">文本绘图（${escapeHtml(String(block.extra.language || '源码'))}）</section>` +
+        renderCode(block, String(block.extra.language || ''), block.extra.diagramSource)
+      );
+
     default: {
       // 未知块：保留自身文本与后代，实在没内容才占位
       const inline = inlineToWechatHtml(block.text);
@@ -243,9 +250,9 @@ function renderQuote(block: Block, depth: number, ctx: Ctx): string {
  * 微信新版编辑器 schema（plan §5.6）：外层包 <section class="code-snippet__js">，
  * 每行内容再包 <span leaf="">——没有叶节点标记，set_content 后代码块会退化成普通段落。
  */
-function renderCode(block: Block, langOverride?: string): string {
+function renderCode(block: Block, langOverride?: string, source?: string): string {
   const lang = langOverride ?? String(block.extra.language || '');
-  const lines = plainText(block.text)
+  const lines = (source ?? plainText(block.text))
     .split('\n')
     .map((line) => {
       const t = escapeHtml(line);
@@ -256,7 +263,7 @@ function renderCode(block: Block, langOverride?: string): string {
     })
     .join('');
   return (
-    `<section class="code-snippet__js"${mark(langOverride ? 'equation' : 'code', block.id)} style="margin:10px 0">` +
+    `<section class="code-snippet__js"${mark(langOverride === 'latex' ? 'equation' : 'code', block.id)} style="margin:10px 0">` +
     `<pre class="code-snippet__js code-snippet code-snippet_nowrap" data-lang="${escapeHtml(lang)}" data-larksnap-content="" ` +
     'style="margin:0;padding:12px 14px;background:#f5f6f7;border-radius:6px;' +
     `font-size:13px;line-height:1.6;overflow-x:auto">${lines}</pre></section>`

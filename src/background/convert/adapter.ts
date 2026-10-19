@@ -46,6 +46,10 @@ function readParent(entry: RawEntry): string | null {
   return p ? String(p) : null;
 }
 
+/** Mermaid 源码的开头关键字（跳过前导空行和 %% 注释行） */
+const MERMAID_START =
+  /^(?:\s*%%.*\n)*\s*(graph|flowchart|sequenceDiagram|classDiagram|stateDiagram(-v2)?|erDiagram|gantt|pie|mindmap|journey|timeline|gitGraph|quadrantChart|requirementDiagram|C4\w+|sankey(-beta)?|xychart(-beta)?|block(-beta)?)\b/;
+
 /** 抽取块特有数据（image/code/table 等），尽力而为 */
 function readExtra(entry: RawEntry, type: string): Record<string, unknown> {
   const data = entry.data ?? {};
@@ -64,6 +68,14 @@ function readExtra(entry: RawEntry, type: string): Record<string, unknown> {
     extra.level = m ? Number(m[1]) : 1;
   }
   if (type === 'todo' || data.done != null) extra.done = Boolean(data.done);
+  // 小组件块（isv）：「文本绘图」把 Mermaid 源码原文存在 data.data.data（iflytek 私有化实测）
+  if (type === 'isv') {
+    const source = (data.data as Record<string, unknown> | undefined)?.data;
+    if (typeof source === 'string' && source.trim()) {
+      extra.diagramSource = source;
+      extra.language = MERMAID_START.test(source) ? 'mermaid' : '';
+    }
+  }
   // 分栏列宽比例（grid_column），公众号渲染按比例分 flex 宽
   if (type === 'grid_column' && data.width_ratio != null) {
     extra.widthRatio = Number(data.width_ratio) || 0;

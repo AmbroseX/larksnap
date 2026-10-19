@@ -116,6 +116,10 @@ function renderBlock(id: string, depth: number, ctx: Ctx): string {
     case type === 'whiteboard' || type === 'board':
       return renderWhiteboardBlock(block, ctx);
 
+    // 文本绘图小组件：直接导出源码（Mermaid 时阅读器能画成图）
+    case type === 'isv' && typeof block.extra.diagramSource === 'string':
+      return '```' + block.extra.language + '\n' + block.extra.diagramSource + '\n```';
+
     default: {
       // 未知块：保留后代文本，否则占位
       const children = renderChildren(block, depth, ctx);
