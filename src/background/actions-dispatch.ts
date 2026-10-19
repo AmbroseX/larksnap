@@ -14,6 +14,7 @@ import { runTracked } from './badge';
 import { detectDocForTab } from './doc-detect';
 import { resolveWikiDocType } from './feishu-api';
 import { getContentTab, setContentTab } from './feishu-proxy';
+import { withKeepAlive } from './keepalive';
 import { exportMarkdown } from './exporters/markdown';
 import { exportSheet } from './exporters/sheet';
 import { exportBitable } from './exporters/bitable';
@@ -295,7 +296,7 @@ export async function trackedExport(
   run: () => Promise<Response>
 ): Promise<Response> {
   const started = Date.now();
-  const res = await run();
+  const res = await withKeepAlive(run);
   void track({
     name: 'export',
     url: `/export/${format}`,

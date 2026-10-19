@@ -50,6 +50,9 @@ async function consumeIntent(): Promise<NavigationIntent | null> {
   }
 }
 
+/** 侧边栏重开时，running 进度超过这么久没更新就当任务已中断 */
+const STALE_TASK_MS = 10 * 60 * 1000;
+
 export function SidePanel() {
   const { t } = useI18n();
   const [view, setView] = useState<View>('home');
@@ -143,9 +146,17 @@ export function SidePanel() {
       const last = res.success ? res.data?.lastProgress : null;
       // 只恢复进行中的任务；上次已完成/失败的旧提示不再翻出来
       if (last && last.status === 'running') {
-        setStatus(last.message);
-        setPhase(last.status);
-        setPercent(last.percent ?? null);
+        // SW 中途被杀不会有任何回调，存下来的 running 进度会永远是"97%"。
+        // 太久没更新的就当已中断（旧版本没有 at 字段的按未过期处理）
+        if (last.at != null && Date.now() - last.at > STALE_TASK_MS) {
+          setStatus(t('sidepanel.staleTask'));
+          setPhase('error');
+          setPercent(null);
+        } else {
+          setStatus(last.message);
+          setPhase(last.status);
+          setPercent(last.percent ?? null);
+        }
       }
     });
     refreshDoc();

@@ -1,4 +1,4 @@
-import type { DocInfo, DocToPdfRequest, DocToPdfResult, Response } from '../../shared/types';
+import type { ClientVarsWarnings, DocInfo, DocToPdfRequest, DocToPdfResult, Response } from '../../shared/types';
 import { t } from '../../shared/i18n';
 import { marked } from 'marked';
 import { OFFSCREEN_MSG } from '../../shared/constants';
@@ -10,7 +10,8 @@ import {
   NotLoggedInError,
 } from './export-task';
 import { blocksToMarkdown } from '../convert/markdown';
-import { downloadImageDataUrls } from '../image-map';
+import { downloadImageDataUrls, replaceAssetRefs } from '../image-map';
+import { incompleteNotes, okResponse, withNotes } from '../incomplete';
 import { extractWhiteboards } from './whiteboard';
 import { withOffscreen } from '../offscreen';
 import { downloadBase64, downloadDataUrl, safeName, isDownloadBridged } from '../download';
@@ -31,14 +32,15 @@ const TRANSPARENT_PNG =
 /** 预解码结果：正文已转 Markdown，附带 resolved，供自渲染路径复用（不再二次拉取） */
 type PreDecoded = ReturnType<typeof blocksToMarkdown> & {
   resolved: Awaited<ReturnType<typeof resolveObjToken>>;
+  warnings?: ClientVarsWarnings;
 };
 
 /** 拉正文并解码成 Markdown（失败抛出，供自渲染路径把错误如实报给用户） */
 async function decodeDoc(doc: DocInfo): Promise<PreDecoded> {
   const resolved = await resolveObjToken(doc);
-  const cv = await fetchClientVars(resolved);
+  const cv = await fetchClientVars(resolved, { action: 'pdf' });
   const data = (cv.data ?? {}) as Record<string, unknown>;
-  return { resolved, ...blocksToMarkdown(data, resolved.objToken) };
+  return { resolved, warnings: cv.warnings, ...blocksToMarkdown(data, resolved.objToken) };
 }
 
 /**
@@ -138,6 +140,7 @@ async function exportPdfViaDecode(
     // pre 有则复用（探测阶段已拉过正文），没有才现拉现解码
     const decoded = pre ?? (await decodeDoc(doc));
     const { resolved, markdown, images, sheetBlocks, whiteboards } = decoded;
+    const notes = incompleteNotes(decoded.warnings);
 
     // 解码也一无所获（多半是私有文档 + 未登录读不到）：官方那条来的就提示登录，别出空 PDF
     if (
@@ -209,12 +212,9 @@ async function exportPdfViaDecode(
 
     await reportProgress('pdf', 'running', t('progress.pdf.rendering'), 90);
     // 短占位符过 marked，再把占位符换成 dataURL（失败图用透明占位，别裂图）
-    let body = await marked.parse(md);
-    for (const img of images) {
-      body = body
-        .split(`feishu-asset://${img.token}`)
-        .join(imgDataUrls[img.token] ?? TRANSPARENT_PNG);
-    }
+    const imgSrc: Record<string, string> = {};
+    for (const img of images) imgSrc[img.token] = imgDataUrls[img.token] ?? TRANSPARENT_PNG;
+    let body = replaceAssetRefs(await marked.parse(md), (token) => imgSrc[token]);
     for (const ref of whiteboards) {
       const url = wbMap[ref.blockId];
       if (!url) continue;
@@ -242,10 +242,10 @@ async function exportPdfViaDecode(
     await reportProgress(
       'pdf',
       'success',
-      truncated ? t('progress.pdf.doneTruncated') : t('progress.pdf.done'),
+      withNotes(truncated ? t('progress.pdf.doneTruncated') : t('progress.pdf.done'), notes),
       100
     );
-    return { success: true };
+    return okResponse(notes);
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     await reportProgress('pdf', 'error', t('progress.pdf.failed', { msg }));

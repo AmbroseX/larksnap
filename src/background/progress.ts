@@ -23,7 +23,7 @@ export async function reportProgress(
   message: string,
   percent?: number
 ): Promise<void> {
-  const progress: ExportProgress = { action, status, message, percent };
+  const progress: ExportProgress = { action, status, message, percent, at: Date.now() };
   _progressSink?.(progress);
   await setRuntimeState({ lastProgress: progress });
   chrome.runtime

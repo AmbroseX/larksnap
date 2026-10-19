@@ -44,3 +44,16 @@ export async function downloadImageDataUrls(
   });
   return map;
 }
+
+/**
+ * 单趟把正文里所有 `feishu-asset://<token>` 换成 resolve 给的地址，没给的原样保留。
+ * 以前是逐图 split/join：每换一张都把整段正文复制一遍，正文又随内联图片越来越大，
+ * 几百张图就是几十 GB 的字符串复制，SW 在这段同步里什么都响应不了（issue #9）。
+ */
+export function replaceAssetRefs(
+  body: string,
+  resolve: (token: string) => string | undefined
+): string {
+  // token 实测是 base62（boxcn… / boxrz…），但私有化部署没有保证，所以吃到属性引号 / 空白 / 标签符为止
+  return body.replace(/feishu-asset:\/\/([^"'\s<>)]+)/g, (m, token: string) => resolve(token) ?? m);
+}

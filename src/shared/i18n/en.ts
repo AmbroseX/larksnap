@@ -138,6 +138,7 @@ export const en: Dict = {
     quotaLabel: 'Quota',
     quotaValue: 'Free for a limited time',
     idle: 'Ready, waiting for action...',
+    staleTask: 'The last task was interrupted (no progress for over 10 minutes). Please retry.',
     runningAction: 'Running "{name}"...',
     actionFailed: 'Action failed',
     authorizedFeishu: 'Authorized. Ready to export.',
@@ -474,9 +475,13 @@ export const en: Dict = {
   progress: {
     common: {
       fetchingDoc: 'Fetching document content...',
+      fetchingPage: 'Fetching document content (page {page})...',
       downloadingImages: 'Downloading {n} images...',
       downloadingImage: 'Downloading image {done}/{total}...',
-      packingZip: 'Packing zip...',
+      packingZip: 'Packing zip ({n} files, {mb} MB)...',
+      incompletePaging: '⚠️ Document may be incomplete: paging hit the limit, the rest was not fetched',
+      incompleteStopped: '⚠️ Document may be incomplete: paging ended early',
+      incompleteSubtree: '⚠️ Tables may be incomplete: subtree fetch exceeded the limit',
     },
     video: {
       handoff: 'Handing the download task to the local daemon…',

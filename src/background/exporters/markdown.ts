@@ -18,7 +18,8 @@ import {
 import { blocksToMarkdown } from '../convert/markdown';
 import { extractEmbeddedSheets, sheetToMdTable } from './sheet';
 import { extractWhiteboards } from './whiteboard';
-import { createZipDataUrl, type ZipFile } from '../zip';
+import { createZipDataUrl, megabytesOf, type ZipFile } from '../zip';
+import { incompleteNotes, okResponse, withNotes } from '../incomplete';
 import { downloadBase64, downloadDataUrl, safeName } from '../download';
 import { downloadCloudFile } from './file';
 import {
@@ -117,7 +118,8 @@ async function runDecodeMd(
     }
     const resolved = await resolveObjToken(doc);
     await reportProgress('markdown', 'running', t('progress.markdown.fetchingBlocks'));
-    const cv = await fetchClientVars(resolved);
+    const cv = await fetchClientVars(resolved, { action: 'markdown' });
+    const notes = incompleteNotes(cv.warnings);
     const data = (cv.data ?? {}) as Record<string, unknown>;
 
     await reportProgress('markdown', 'running', t('progress.markdown.converting'));
@@ -238,6 +240,7 @@ async function runDecodeMd(
           const ext = extFromMime(a.blob.mimeType || img.mimeType, img.name);
           const path = `images/${img.token}.${ext}`;
           files.push({ path, content: base64ToBytes(a.blob.base64) });
+          assets[i] = null; // 字节已拷走，立刻放掉 base64 字符串，打包时少占三分之一内存
           finalMd = replaceAll(finalMd, `feishu-asset://${img.token}`, path);
         } else {
           // 单图失败：降级为在线 URL，不拖垮整篇（宪法原则 III）
@@ -270,8 +273,18 @@ async function runDecodeMd(
         }
       }
       files.unshift({ path: `${safeName(title)}.md`, content: finalMd });
-      await reportProgress('markdown', 'running', t('progress.common.packingZip'), 97);
+      const mb = megabytesOf(files);
+      await reportProgress(
+        'markdown',
+        'running',
+        t('progress.common.packingZip', { n: files.length, mb }),
+        97
+      );
+      // 留下打包耗时与规模，下次有人报"卡在 97%"时日志里能看到卡在哪一步
+      console.time('[larksnap] zip 打包');
       const zipUrl = await createZipDataUrl(files);
+      console.timeEnd('[larksnap] zip 打包');
+      console.log(`[larksnap] zip 打包完成：${files.length} 个文件，${mb} MB`);
       await downloadDataUrl(zipUrl, `${safeName(title)}.zip`);
 
       if (ok < images.length) {
@@ -279,20 +292,20 @@ async function runDecodeMd(
           ok === 0
             ? t('progress.markdown.allImagesFailed', { n: images.length })
             : t('progress.markdown.doneWithPartialImages', { ok, total: images.length });
-        await reportProgress('markdown', ok === 0 ? 'error' : 'success', msg, 100);
-        return { success: ok > 0, error: ok === 0 ? msg : undefined };
+        await reportProgress('markdown', ok === 0 ? 'error' : 'success', withNotes(msg, notes), 100);
+        return ok === 0 ? { success: false, error: msg } : okResponse(notes);
       }
       await reportProgress(
         'markdown',
         'success',
-        t('progress.markdown.doneWithImages', { ok }),
+        withNotes(t('progress.markdown.doneWithImages', { ok }), notes),
         100
       );
-      return { success: true };
+      return okResponse(notes);
     }
 
-    await reportProgress('markdown', 'success', t('progress.markdown.done'), 100);
-    return { success: true };
+    await reportProgress('markdown', 'success', withNotes(t('progress.markdown.done'), notes), 100);
+    return okResponse(notes);
   } catch (err) {
     return fail('markdown', errMsg(err));
   }

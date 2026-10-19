@@ -6,7 +6,8 @@ import { resolveObjToken, fetchClientVars } from '../feishu-api';
 import { blocksToMarkdown } from '../convert/markdown';
 import { downloadDataUrl, safeName } from '../download';
 import { onlineMediaUrl } from '../media-util';
-import { downloadImageDataUrls } from '../image-map';
+import { downloadImageDataUrls, replaceAssetRefs } from '../image-map';
+import { incompleteNotes, okResponse, withNotes } from '../incomplete';
 
 /**
  * 导出为 HTML —— **从 client_vars 自渲染**（与 Markdown 同源），而非 DOM 快照。
@@ -20,7 +21,8 @@ export async function exportHtml(doc: DocInfo): Promise<Response> {
 
   try {
     const resolved = await resolveObjToken(doc);
-    const cv = await fetchClientVars(resolved);
+    const cv = await fetchClientVars(resolved, { action: 'html' });
+    const notes = incompleteNotes(cv.warnings);
     const data = (cv.data ?? {}) as Record<string, unknown>;
     const { markdown, images, sheetBlocks } = blocksToMarkdown(data, resolved.objToken);
     const title = resolved.title || doc.title || doc.token;
@@ -58,18 +60,15 @@ export async function exportHtml(doc: DocInfo): Promise<Response> {
     }
 
     await reportProgress('html', 'running', t('progress.html.generating'), 97);
-    let body = await marked.parse(md);
-    for (const [token, url] of Object.entries(urlMap)) {
-      body = body.split(`feishu-asset://${token}`).join(url);
-    }
+    const body = replaceAssetRefs(await marked.parse(md), (token) => urlMap[token]);
 
     const full = htmlDocument(title, body);
     await downloadDataUrl(
       'data:text/html;charset=utf-8,' + encodeURIComponent(full),
       `${safeName(title)}.html`
     );
-    await reportProgress('html', 'success', t('progress.html.done'), 100);
-    return { success: true };
+    await reportProgress('html', 'success', withNotes(t('progress.html.done'), notes), 100);
+    return okResponse(notes);
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     await reportProgress('html', 'error', t('progress.html.failed', { msg }));

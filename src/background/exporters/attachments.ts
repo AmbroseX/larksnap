@@ -3,7 +3,8 @@ import { t } from '../../shared/i18n';
 import { reportProgress } from '../progress';
 import { resolveObjToken, fetchClientVars } from '../feishu-api';
 import { downloadMedia } from '../feishu-proxy';
-import { createZipDataUrl, type ZipFile } from '../zip';
+import { createZipDataUrl, megabytesOf, type ZipFile } from '../zip';
+import { incompleteNotes, withNotes } from '../incomplete';
 import { downloadDataUrl, safeName } from '../download';
 import {
   base64ToBytes,
@@ -21,7 +22,8 @@ export async function exportAttachments(doc: DocInfo): Promise<Response> {
 
   try {
     const resolved = await resolveObjToken(doc);
-    const cv = await fetchClientVars(resolved);
+    const cv = await fetchClientVars(resolved, { action: 'attachments' });
+    const notes = incompleteNotes(cv.warnings);
     const data = (cv.data ?? {}) as Record<string, unknown>;
     const assets = collectAssets(data);
 
@@ -60,7 +62,8 @@ export async function exportAttachments(doc: DocInfo): Promise<Response> {
     const files: ZipFile[] = [];
     const used = new Set<string>();
     let ok = 0;
-    for (const r of results) {
+    for (let i = 0; i < results.length; i++) {
+      const r = results[i];
       if (!r) continue;
       ok++;
       const ext = extFromMime(r.blob.mimeType || r.a.mimeType, r.a.name);
@@ -73,6 +76,7 @@ export async function exportAttachments(doc: DocInfo): Promise<Response> {
       if (used.has(name)) name = `${baseName}-${r.a.token.slice(-6)}.${ext}`;
       used.add(name);
       files.push({ path: name, content: base64ToBytes(r.blob.base64) });
+      results[i] = null; // 字节已拷走，放掉 base64 字符串
     }
 
     if (files.length === 0) {
@@ -81,18 +85,27 @@ export async function exportAttachments(doc: DocInfo): Promise<Response> {
       return { success: false, error: msg };
     }
 
-    await reportProgress('attachments', 'running', t('progress.common.packingZip'), 97);
+    const mb = megabytesOf(files);
+    await reportProgress(
+      'attachments',
+      'running',
+      t('progress.common.packingZip', { n: files.length, mb }),
+      97
+    );
     const title = resolved.title || doc.title || doc.token;
+    console.time('[larksnap] 附件 zip 打包');
     const zipUrl = await createZipDataUrl(files);
+    console.timeEnd('[larksnap] 附件 zip 打包');
+    console.log(`[larksnap] 附件 zip 打包完成：${files.length} 个文件，${mb} MB`);
     await downloadDataUrl(zipUrl, `${safeName(title)}-${t('progress.attachments.zipSuffix')}.zip`);
 
     await reportProgress(
       'attachments',
       'success',
-      t('progress.attachments.done', { ok, total: assets.length }),
+      withNotes(t('progress.attachments.done', { ok, total: assets.length }), notes),
       100
     );
-    return { success: true, data: { count: ok } };
+    return { success: true, data: { count: ok, ...(notes.length ? { warnings: notes } : {}) } };
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     await reportProgress('attachments', 'error', t('progress.attachments.failed', { msg }));

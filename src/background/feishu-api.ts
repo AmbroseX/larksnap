@@ -1,5 +1,17 @@
-import type { DocInfo } from '../shared/types';
+import type { ClientVarsWarnings, DocInfo, ExportAction } from '../shared/types';
+import { t } from '../shared/i18n';
 import { feishuGet, feishuPost, fetchSubtrees } from './feishu-proxy';
+import { reportProgress } from './progress';
+
+/**
+ * 续页次数上限（首屏之外）。每页 239 块，1000 页约 24 万块，远超单篇文档实际上限。
+ * 循环真正的退出条件是"拿不到新块"或"没有 cursor"，这个数只是防死循环的兜底。
+ * 历史：曾是 50（约 1.2 万块），超长文档到此静默截断，见 issue #13。
+ */
+export const PAGING_LIMIT = 1000;
+
+/** 翻页时每拉这么多页上报一次进度：让用户看到它还活着，也刷新侧边栏的陈旧判定 */
+const PROGRESS_EVERY_PAGES = 10;
 
 /**
  * 飞书内部接口路径封装（集中管理，§8 风险:接口变更只需改这里）。
@@ -193,7 +205,11 @@ export async function createDocx(opts?: {
  * 否则表格单元格（table_cell）永远不在 block_map 里。
  * 返回合并后的 { block_map, block_sequence, meta_map, ...原始首屏字段 }。
  */
-export async function fetchClientVars(doc: ResolvedDoc): Promise<Json> {
+export async function fetchClientVars(
+  doc: ResolvedDoc,
+  /** 传了就在翻页期间按该动作上报进度（超长文档翻 1000 页要好几分钟，不能一直没动静） */
+  opts?: { action?: ExportAction }
+): Promise<Json & { warnings?: ClientVarsWarnings }> {
   const wikiPart = doc.wikiToken
     ? `&wiki_space_id=${doc.spaceId ?? ''}&container_type=wiki2.0&container_id=${doc.wikiToken}`
     : '';
@@ -238,8 +254,18 @@ export async function fetchClientVars(doc: ResolvedDoc): Promise<Json> {
   // mode=4 不带 block_id 报 4000091，带了则不报错但永远返回第一屏）。
   // 成功判据必须是"返回了新块 ID"，用"有块"判会被第一屏骗成死循环。
   let winner = '';
-  while (hasMore && guard < 50) {
+  const warnings: ClientVarsWarnings = {};
+  // 退出原因在 break 处记下来，不事后靠 guard 反推（第 1000 页恰好没 cursor 会推错）
+  let stoppedEarly = false;
+  while (hasMore && guard < PAGING_LIMIT) {
     guard++;
+    if (opts?.action && guard % PROGRESS_EVERY_PAGES === 0) {
+      await reportProgress(
+        opts.action,
+        'running',
+        t('progress.common.fetchingPage', { page: guard + 1 })
+      );
+    }
     const next = firstCursorOf(nextCursors);
     const variants: Array<{ tag: string; q: string }> = [];
     const push = (tag: string, q: string, c: string) => {
@@ -271,14 +297,31 @@ export async function fetchClientVars(doc: ResolvedDoc): Promise<Json> {
         break;
       }
     }
-    if (!pd) break; // 没有任何组合能拿到新块：停止翻页，导出已合并部分
+    if (!pd) {
+      stoppedEarly = true; // 没有任何组合能拿到新块：停止翻页，导出已合并部分
+      break;
+    }
     mergeBlockMap(blockMap, (pd.block_map ?? {}) as Record<string, unknown>);
     mergeSeq(pd);
     for (const s of (pd.skip_blocks as string[]) ?? []) skipped.add(String(s));
     hasMore = Boolean(pd.has_more);
     cursor = (pd.cursor as string) ?? '';
     nextCursors = pd.next_cursors;
-    if (!cursor && !firstCursorOf(nextCursors)) break;
+    if (!cursor && !firstCursorOf(nextCursors)) {
+      stoppedEarly = true;
+      break;
+    }
+  }
+  // 退出时 has_more 仍为 true 就是正文没拉完。原因要分开记：guard 用完是"达到上限"，
+  // 另两个 break（拿不到新块 / 没有 cursor）是服务端提前停了，文案不能说"上限"。
+  if (hasMore) {
+    if (!stoppedEarly) {
+      warnings.pagingTruncated = true;
+      console.warn(`[larksnap] 翻页达到 ${PAGING_LIMIT} 页上限仍有后续，正文可能不完整`);
+    } else {
+      warnings.pagingStopped = true;
+      console.warn(`[larksnap] 翻页在第 ${guard} 页提前结束但 has_more=true，正文可能不完整`);
+    }
   }
 
   // 补拉被跳过的子树：mode=4 + block_id（表格单元格及其正文块从这里来）
@@ -299,6 +342,7 @@ export async function fetchClientVars(doc: ResolvedDoc): Promise<Json> {
     });
     for (const pageMap of sub.pages) mergeBlockMap(blockMap, pageMap);
     if (sub.truncated) {
+      warnings.subtreeTruncated = true;
       console.warn(
         `[larksnap] 补拉撞到 50 块上限，表格内容可能不全（已拉 ${sub.requests} 个请求）`
       );
@@ -308,7 +352,7 @@ export async function fetchClientVars(doc: ResolvedDoc): Promise<Json> {
   data.block_map = blockMap;
   data.block_sequence = sequence;
   first.data = data;
-  return first;
+  return Object.keys(warnings).length > 0 ? { ...first, warnings } : first;
 }
 
 /** next_cursors 可能是字符串 / 字符串数组 / 对象，取第一个非空字符串 */

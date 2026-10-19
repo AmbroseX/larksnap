@@ -121,6 +121,9 @@ function handleLine(msg) {
         return localizeCdnImages(folder, written).then((extra) => {
           console.log(`✓ 已导出到 ${path.resolve(folder)}`);
           for (const w of [...written, ...extra]) console.log('   -', w);
+          // 扩展发现正文可能不完整（翻页到上限、表格补拉超限）时带回来的提示，
+          // 走 stdout：调用方（Claude Code）按 stdout 判结果，stderr 的进度行它不看
+          for (const w of msg.warnings || []) console.log(w);
           return 0;
         });
       } catch (e) {

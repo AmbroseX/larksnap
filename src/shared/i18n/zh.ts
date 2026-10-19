@@ -133,6 +133,7 @@ export const zh = {
     quotaLabel: '额度',
     quotaValue: '限时免费开放',
     idle: '准备就绪，等待操作...',
+    staleTask: '上次任务已中断（超过 10 分钟没有进度），请重试',
     runningAction: '「{name}」执行中...',
     actionFailed: '操作失败',
     authorizedFeishu: '已授权，可开始导出',
@@ -451,9 +452,13 @@ export const zh = {
   progress: {
     common: {
       fetchingDoc: '正在拉取文档内容...',
+      fetchingPage: '正在拉取文档内容（第 {page} 页）...',
       downloadingImages: '正在下载 {n} 张图片...',
       downloadingImage: '正在下载图片 {done}/{total}...',
-      packingZip: '正在打包 zip...',
+      packingZip: '正在打包 zip（{n} 个文件，{mb} MB）...',
+      incompletePaging: '⚠️ 文档可能不完整：翻页达到上限，后半部分未拉到',
+      incompleteStopped: '⚠️ 文档可能不完整：翻页提前结束',
+      incompleteSubtree: '⚠️ 表格内容可能不全：子树补拉超过上限',
     },
     video: {
       handoff: '正在把下载任务交给本地 daemon…',

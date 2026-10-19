@@ -61,6 +61,21 @@ export interface ExportProgress {
   percent?: number;
   /** 状态栏展示的文案，如 "准备就绪，等待操作..." */
   message: string;
+  /** 上报时刻（ms）。侧边栏重开时据此判断 running 状态是否早已过期 */
+  at?: number;
+}
+
+/**
+ * fetchClientVars 拉正文时发现的"可能不完整"情况。
+ * 导出器据此在成功文案后追加提示，并写进 Response.data.warnings 让桥接方也能看到。
+ */
+export interface ClientVarsWarnings {
+  /** 翻页达到 PAGING_LIMIT 时 has_more 仍为 true：正文后半段没拉到 */
+  pagingTruncated?: boolean;
+  /** 服务端提前不再给新块或 cursor，但 has_more 仍为 true：正文可能不全 */
+  pagingStopped?: boolean;
+  /** 补拉子树撞到 content 侧 MAX_BLOCKS：表格内容可能不全 */
+  subtreeTruncated?: boolean;
 }
 
 // ==================== 缓存 ====================

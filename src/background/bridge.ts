@@ -25,6 +25,7 @@ import { setContentTab } from './feishu-proxy';
 import { safeName, setDownloadSink } from './download';
 import { injectWebcopy, isRestrictedUrl, runAdapter, sendToTab } from './webcopy';
 import { findAdapter } from './webcopy-adapters';
+import { withKeepAlive } from './keepalive';
 import { setProgressSink } from './progress';
 import { exportMarkdown } from './exporters/markdown';
 import { exportSheet } from './exporters/sheet';
@@ -467,7 +468,12 @@ function reply(id: string, payload: Record<string, unknown>): void {
   if (ws?.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ ...payload, id }));
 }
 
-async function runJob(job: Job): Promise<void> {
+/** 整个任务期间给 SW 保活：桥接没有挂着的消息端口，长活中途会被 30 秒空闲回收 */
+function runJob(job: Job): Promise<void> {
+  return withKeepAlive(() => runJobInner(job));
+}
+
+async function runJobInner(job: Job): Promise<void> {
   let tabId: number | undefined;
   let artifact: { url: string; filename: string } | null = null;
   try {
@@ -551,10 +557,13 @@ async function runJob(job: Job): Promise<void> {
     } else if (!artifact) {
       reply(job.id, { type: 'error', message: '导出成功但未捕获到产物（sink 未命中）' });
     } else {
+      // 导出器发现正文可能不完整时把提示放在 data.warnings，带给命令行（stderr 的进度流 Agent 看不到）
+      const warnings = (res.data as { warnings?: string[] } | undefined)?.warnings;
       reply(job.id, {
         type: 'result',
         filename: (artifact as { filename: string }).filename,
         dataUrl: (artifact as { url: string }).url,
+        ...(warnings?.length ? { warnings } : {}),
       });
     }
   } catch (err) {
