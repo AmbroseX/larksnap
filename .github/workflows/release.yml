@@ -72,3 +72,15 @@ jobs:
             larksnap-v${{ steps.ver.outputs.version }}.zip
             larksnap-v${{ steps.ver.outputs.version }}.crx
           generate_release_notes: true
+
+      # 把 zip 传到 Chrome 商店。publish: false 只上传草稿，到后台手动点提交审核；
+      # 跑通一次确认没问题后，可改成 true 自动提交审核
+      - name: Upload to Chrome Web Store
+        uses: mnao305/chrome-extension-upload@v5.0.0
+        with:
+          file-path: larksnap-v${{ steps.ver.outputs.version }}.zip
+          extension-id: ${{ secrets.CWS_EXTENSION_ID }}
+          client-id: ${{ secrets.CWS_CLIENT_ID }}
+          client-secret: ${{ secrets.CWS_CLIENT_SECRET }}
+          refresh-token: ${{ secrets.CWS_REFRESH_TOKEN }}
+          publish: false
