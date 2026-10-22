@@ -43,6 +43,8 @@ export const MSG = {
   /** 多维表格导出 Excel（.xlsx，读页面内存拼多 sheet） */
   EXPORT_EXCEL: 'export_excel',
   EXPORT_ATTACHMENTS: 'export_attachments',
+  /** 转存到飞书：「剪存」协议把当前页内容写回飞书云文档（HTML → docx） */
+  CLIP_TO_FEISHU: 'clip_to_feishu',
   EXPORT_XHS: 'export_xhs',
   EXPORT_WECHAT: 'export_wechat',
   /** 整页长图截图（任意网页，输出 PNG/PDF），data={ format } */
@@ -161,6 +163,8 @@ export const CONTENT_MSG = {
   WEBCOPY_UNLOCK: 'webcopy_unlock',
   /** 查询挂载状态（unlocked 等） */
   WEBCOPY_STATE: 'webcopy_state',
+  /** 提取当前页正文 HTML（剪存转存用）：响应 { html, title } */
+  WEBCOPY_CLIP_HTML: 'webcopy_clip_html',
 } as const;
 
 /** YouTube 字幕 content script（youtube.js）的内部消息类型（背景 → content） */
@@ -173,6 +177,31 @@ export const YT_MSG = {
 
 /** POST 校验用的 CSRF cookie 候选名（按序尝试，失败换名重试） */
 export const CSRF_COOKIE_NAMES = ['_csrf_token', 'swp_csrf_token'];
+
+// ==================== 「剪存」转存协议（逆向自飞书转存专家 v0.8.19） ====================
+
+/**
+ * 剪存上传通道的伪装版本号 —— 与官方「飞书剪存」扩展同款（1.0.40）。
+ * 服务端按此识别客户端；升级飞书服务端后可能需同步跟进。
+ */
+export const CLIP_VERSION = '1.0.40';
+
+/** 剪存上传的默认封面图（官方剪存 icon） */
+export const CLIP_COVER_ICON =
+  '//lf-package-cn.feishu.cdn.com/obj/feishu-static/ccm-vmok/web/feishu.ico';
+
+/**
+ * 推导剪存解析服务域名：
+ * - larksuite.com / sg.larksuite.com → internal-api-space-sg.larksuite.com
+ * - 其余（feishu.cn、私有化基础域）→ internal-api-space.feishu.cn
+ * 注：私有化租户也走 feishu.cn 的公网解析服务（与目标扩展一致）。
+ */
+export function clipHostFor(host: string): string {
+  const isLark = /(^|\.)larksuite\.com$/i.test(host);
+  return isLark
+    ? 'https://internal-api-space-sg.larksuite.com'
+    : 'https://internal-api-space.feishu.cn';
+}
 
 /** 飞书 token 正则：未知域名识别门槛 */
 export const FEISHU_TOKEN_RE = /^[A-Za-z0-9]{16,}$/;

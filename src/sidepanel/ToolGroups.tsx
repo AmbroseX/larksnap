@@ -279,6 +279,17 @@ export function ToolGroups({
       await copyText(res.data.markdown, t('webcopy.pageMd.copiedSelection'));
     });
 
+  /** 转存到飞书：进度经 PROGRESS 推送到状态栏（clip 动作），这里等最终结果 */
+  const handleClipToFeishu = () =>
+    run('clip', async () => {
+      const res = await callWebcopy<{ docUrl: string }>(MSG.CLIP_TO_FEISHU);
+      if (!res.success) {
+        report(false, res.error || t('webcopy.actionFailed'));
+        return;
+      }
+      report(true, t('webcopy.clipToFeishu.done'));
+    });
+
   const handleCopyTabs = (scope: 'current' | 'all') =>
     run(`tabs-${scope}`, async () => {
       const res = await sendToBackground<{ text: string; count: number }>(MSG.COPY_TABS, {
@@ -405,6 +416,18 @@ export function ToolGroups({
           >
             {t('webcopy.pageMd.selectionOnly')}
           </button>
+        </div>
+        <div className="wc-btn-row">
+          <button
+            className="wc-btn"
+            disabled={disabled || !!busy}
+            onClick={handleClipToFeishu}
+          >
+            {t('webcopy.clipToFeishu.button')}
+          </button>
+        </div>
+        <div className="wc-row-sub" style={{ marginBottom: 8 }}>
+          {t('webcopy.clipToFeishu.sub')}
         </div>
         <div className="wc-btn-row">
           <button

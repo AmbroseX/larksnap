@@ -31,6 +31,7 @@ import {
   webcopySelectionMdInPage,
   webcopyUnlockInPage,
 } from './webcopy';
+import { clipPageToFeishu } from './clip/clip-page';
 
 /**
  * 统一动作分发层（006）：右键菜单、键盘快捷键、侧边栏按钮三类入口
@@ -145,6 +146,7 @@ const ROUTES: Record<ActionId, ActionRoute> = {
   'feishu-pdf': { feedback: 'badge', run: (ctx) => runFeishuExport(ctx, 'pdf') },
   'feishu-html': { feedback: 'badge', run: (ctx) => runFeishuExport(ctx, 'html') },
   'feishu-excel': { feedback: 'badge', run: (ctx) => runExcelExport(ctx) },
+  'clip-to-feishu': { feedback: 'badge', run: (ctx) => clipPageToFeishu(ctx.tabId, ctx.url) },
 };
 
 /** 多维表格导出 Excel：识别 tab → 就绪校验 → 只放行 base 类型 → 读内存出 xlsx */

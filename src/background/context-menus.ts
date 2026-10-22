@@ -24,6 +24,7 @@ export const MENU_ACTION: Record<string, ActionId> = {
   'menu-feishu-more': 'open-panel',
   'menu-page-md': 'page-md',
   'menu-page-md-dl': 'page-md-download',
+  'menu-page-clip': 'clip-to-feishu',
   'menu-selection-md': 'selection-md',
   'menu-ask-ai-sum': 'ask-ai-selection',
   'menu-ask-ai-translate': 'ask-ai-selection',
@@ -76,6 +77,7 @@ export function buildMenuSpecs(tf: (key: TranslationKey) => string): MenuSpec[] 
     // 通用组：任何页面常驻
     { id: 'menu-page-md', title: tf('menu.pageMd'), contexts: ['page'], parentId: root },
     { id: 'menu-page-md-dl', title: tf('menu.pageMdDl'), contexts: ['page'], parentId: root },
+    { id: 'menu-page-clip', title: tf('menu.pageClip'), contexts: ['page'], parentId: root },
     { id: 'menu-selection-md', title: tf('menu.selectionMd'), contexts: ['selection'], parentId: root },
     // 问 AI（008）：只在有选区时出现，走对话页纯聊天通路，零授权
     { id: 'menu-ask-ai-sum', title: tf('menu.askAiSum'), contexts: ['selection'], parentId: root },

@@ -18,7 +18,7 @@ import { bytesToBase64 } from './media-util';
  * site 由白名单归类：命中报站名，其余 'other'；缺 url（如复制全部标签页）报 'other'。
  */
 function trackWebcopy(
-  action: 'page' | 'selection' | 'unlock' | 'tabs',
+  action: 'page' | 'selection' | 'unlock' | 'tabs' | 'clip',
   url?: string
 ): void {
   const site = url ? matchClipSite(url) : 'other';
@@ -297,6 +297,17 @@ export function webcopyToggleUnlock(tabId: number, url: string, enabled: boolean
 export function webcopyEnsure(tabId: number, url: string) {
   return withInjectedTab<WebCopyState>(tabId, url, (id) =>
     sendToTab<WebCopyState>(id, CONTENT_MSG.WEBCOPY_STATE, {})
+  );
+}
+
+/**
+ * 剪存转存用：提取当前页正文 HTML（Defuddle 正文包成最小文档）。
+ * 复用注入管线，权限不足同样回 needsPermission 让 UI 在同手势里授权重试。
+ */
+export function webcopyClipHtml(tabId: number, url: string) {
+  trackWebcopy('clip', url);
+  return withInjectedTab<{ html: string; title: string }>(tabId, url, (id) =>
+    sendToTab<{ html: string; title: string }>(id, CONTENT_MSG.WEBCOPY_CLIP_HTML, {})
   );
 }
 
